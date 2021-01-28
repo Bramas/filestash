@@ -50,12 +50,12 @@ git clone https://github.com/mickael-kerjean/filestash
 cd filestash
 
 # Build the image
-docker.exe build -f docker/Dockerfile.dev -t filestash-dev .
+docker build -f docker/Dockerfile.dev -t filestash-dev .
 
 # Run the image
-docker.exe run -v $PWD:/var/app -p 8334:8334 -it filestash-dev
+docker run -v $(pwd):/var/app -p 8334:8334 -it filestash-dev
 
 # Install and run as explained in the previous section
 ```
 
-On windows WSL, remember that docker should be docker.exe and `-v $PWD:/var/app` should be replace with `-v /c/path/to/current/directory:/var/app` (notice the `/c` instead of `/mnt/c` that WSL uses)
+On windows WSL, remember that `docker` should be `docker.exe` and `-v $PWD:/var/app` should be replace with `-v /c/path/to/current/directory:/var/app` (notice the `/c` instead of `/mnt/c` that WSL uses)
