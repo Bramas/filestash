@@ -1,0 +1,29 @@
+FROM debian:stable
+
+
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		g++ \
+		gcc \
+		libc6-dev \
+		make \
+		libglib2.0-dev \
+		curl \
+		pkg-config \
+		git
+
+RUN curl --insecure -O https://dl.google.com/go/go1.14.13.linux-amd64.tar.gz \
+    && tar xvf go1.14.13.linux-amd64.tar.gz \
+    && chown -R root:root ./go \
+	&& mv go /usr/local
+
+RUN curl -sL https://deb.nodesource.com/setup_15.x | bash - \
+	&& apt-get install -y nodejs \
+	&& curl -L https://www.npmjs.com/install.sh | sh
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+VOLUME /var/app
+WORKDIR /var/app
+
+CMD ["/bin/bash"]

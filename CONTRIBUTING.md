@@ -38,3 +38,24 @@ make build_backend
 
 ### Tests
 Our tests aren't open source. This comes as an attempt to restrict opportunistic forks (see [1](https://news.ycombinator.com/item?id=17006902#17009852) and [2](https://www.reddit.com/r/selfhosted/comments/a54axs/annoucing_jellyfin_a_free_software_fork_of_emby/ebk92iu/?utm_source=share&utm_medium=web2x)) from creating a stable release without serious commitment and splitting the community in pieces while I'm on holidays. Also the project welcome serious and willing maintainers.
+
+
+### Docker development image
+
+The docker folder contain a docker file `Dockerfile.dev` to setup quickely a development environment.
+
+```
+# Download the source
+git clone https://github.com/mickael-kerjean/filestash
+cd filestash
+
+# Build the image
+docker.exe build -f docker/Dockerfile.dev -t filestash-dev .
+
+# Run the image
+docker.exe run -v $PWD:/var/app -p 8334:8334 -it filestash-dev
+
+# Install and run as explained in the previous section
+```
+
+On windows WSL, remember that docker should be docker.exe and `-v $PWD:/var/app` should be replace with `-v /c/path/to/current/directory:/var/app` (notice the `/c` instead of `/mnt/c` that WSL uses)
