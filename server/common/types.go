@@ -28,6 +28,7 @@ type File struct {
 	CanRename *bool  `json:"can_rename,omitempty"`
 	CanMove   *bool  `json:"can_move_directory,omitempty"`
 	CanDelete *bool  `json:"can_delete,omitempty"`
+	Options   string `json:"options,omitempty"`
 }
 
 func (f File) Name() string {

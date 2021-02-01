@@ -14,6 +14,10 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	. "github.com/mickael-kerjean/filestash/server/common"
+	. "github.com/mickael-kerjean/filestash/server/middleware"
+	"github.com/gorilla/mux"
+	"net/http"
+	"github.com/mickael-kerjean/filestash/server/model"
 )
 
 var S3Cache AppCache
@@ -27,6 +31,30 @@ type S3Backend struct {
 func init() {
 	Backend.Register("s3", S3Backend{})
 	S3Cache = NewAppCache(2, 1)
+
+	
+
+	Hooks.Register.HttpEndpoint(func(r *mux.Router, a *App) error{
+		r.HandleFunc(
+			"/api/options/storageClass", 
+			NewMiddlewareChain(
+				getStorageClassHandle, 
+				[]Middleware{ SessionStart, LoggedInOnly }, 
+				*a,
+			),
+		).Methods("GET")
+
+		r.HandleFunc(
+			"/api/options/storageClass", 
+			NewMiddlewareChain(
+				postStorageClassHandle, 
+				[]Middleware{ SessionStart, LoggedInOnly }, 
+				*a,
+			),
+		).Methods("POST")
+
+		return nil
+	})
 }
 
 func (s S3Backend) Init(params map[string]string, app *App) (IBackend, error) {
@@ -162,6 +190,7 @@ func (s S3Backend) Ls(path string) (files []os.FileInfo, err error) {
 			FType: "file",
 			FTime: object.LastModified.Unix(),
 			FSize: *object.Size,
+			Options: *object.StorageClass,
 		})
 	}
 	for _, object := range objs.CommonPrefixes {
@@ -396,3 +425,138 @@ func (s S3Backend) path(p string) S3Path {
 		path,
 	}
 }
+
+
+func getStorageClassHandle(ctx App, res http.ResponseWriter, req *http.Request) {
+	if model.CanRead(&ctx) == false {
+		SendErrorResult(res, ErrPermissionDenied)
+		return
+	}
+
+	path := req.URL.Query().Get("path")
+	newStorageClass := req.URL.Query().Get("storageClass")
+	Log.Info("path: "+path)
+	Log.Info("storageClass "+newStorageClass)
+
+	backend, ok := ctx.Backend.(*S3Backend)
+	if !ok {
+		Log.Info("wrong backend")
+		SendErrorResult(res, ErrPermissionDenied)
+		return
+	}
+
+
+	p := backend.path(path)
+	client := s3.New(backend.createSession(p.bucket))
+
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(p.bucket),
+		Key:    aws.String(p.path),
+	}
+
+	
+	obj, err := client.HeadObject(input)
+	if err != nil {
+		Log.Info("client.HeadObject(input) error")
+		SendErrorResult(res, ErrPermissionDenied)
+		return
+	}
+
+	class := "STANDARD"
+	if obj.StorageClass != nil {
+		class = *obj.StorageClass
+	}
+	Log.Info(class)
+	SendSuccessResult(res, class)
+}
+
+
+func postStorageClassHandle(ctx App, res http.ResponseWriter, req *http.Request) {
+	if model.CanEdit(&ctx) == false {
+		SendErrorResult(res, ErrPermissionDenied)
+		return
+	}
+
+	path := req.URL.Query().Get("path")
+	newStorageClass := req.URL.Query().Get("storageClass")
+	Log.Info("path: "+path)
+	Log.Info("storageClass "+newStorageClass)
+
+	backend, ok := ctx.Backend.(*S3Backend)
+	if !ok {
+		SendErrorResult(res, ErrNotImplemented)
+		return
+	}
+
+	p := backend.path(path)
+	if p.path == "" || strings.HasSuffix(p.path, "/") {
+		SendErrorResult(res, ErrNotImplemented)
+		return
+	}
+
+	client := s3.New(backend.createSession(p.bucket))
+
+	if newStorageClass == "GLACIER" {
+		Log.Info(" -> GLACIER")
+
+		input := &s3.CopyObjectInput{
+			Bucket:            aws.String(p.bucket),
+			CopySource:        aws.String(p.bucket + "/" + p.path),
+			Key:               aws.String(p.path),
+			StorageClass:      aws.String(newStorageClass),
+			MetadataDirective: aws.String("COPY"),
+		}
+
+		if backend.params["encryption_key"] != "" {
+			input.CopySourceSSECustomerAlgorithm = aws.String("AES256")
+			input.CopySourceSSECustomerKey = aws.String(backend.params["encryption_key"])
+			input.SSECustomerAlgorithm = aws.String("AES256")
+			input.SSECustomerKey = aws.String(backend.params["encryption_key"])
+		}
+
+		_, err := client.CopyObject(input)
+		if err != nil {
+			SendErrorResult(res, err)
+			return
+		}
+
+		SendSuccessResult(res, nil)
+		return
+		
+	} else if newStorageClass == "STANDARD" {
+		Log.Info(" -> STANDARD")
+
+		input := &s3.RestoreObjectInput{
+			Bucket:            aws.String(p.bucket),
+			Key:               aws.String(p.path),
+			RestoreRequest: &s3.RestoreRequest{
+				Days: aws.Int64(7),
+			},
+		}
+		
+		_, err := client.RestoreObject(input)
+		if err != nil {
+			if aerr, ok := err.(awserr.Error); ok {
+				switch aerr.Code() {
+				case s3.ErrCodeObjectAlreadyInActiveTierError:
+					// we might want to do something specific in this case
+					//fmt.Println(s3.ErrCodeObjectAlreadyInActiveTierError, aerr.Error())
+					Log.Info("ErrCodeObjectAlreadyInActiveTierError")
+					Log.Info(aerr.Error())
+
+					SendErrorResult(res, err)
+				}
+			}
+			Log.Info(err.Error())
+
+			SendErrorResult(res, err)
+			return
+		}
+
+		SendSuccessResult(res, nil)
+		return
+	}
+
+	SendErrorResult(res, ErrNotImplemented)
+}
+
