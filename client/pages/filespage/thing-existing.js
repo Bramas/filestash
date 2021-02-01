@@ -239,6 +239,9 @@ export class ExistingThing extends React.Component {
         if(this.state.preview){
             className += "preview ";
         }
+        if(this.props.options){
+            className += "options-"+this.props.options.toLowerCase()+" ";
+        }
         className = className.trim();
 
         let fileLink = this.props.file.link
