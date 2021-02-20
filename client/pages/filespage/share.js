@@ -229,7 +229,7 @@ export class ShareComponent extends React.Component {
                 <h2>{ t("Restrictions") }</h2>
                 <div className="share--content advanced-settings no-select">
                   <SuperCheckbox value={this.state.users} label={ t("Only for users") } placeholder="name0@email.com,name1@email.com" onChange={this.updateState.bind(this, 'users')} inputType="text"/>
-                  <SuperCheckbox value={this.state.password} label={ t("Password") } placeholder={ t("protect access with a password") } onChange={this.updateState.bind(this, 'password')} inputType="password"/>
+                  <SuperCheckbox value={this.state.password} defaultValue={randomString(7)} label={ t("Password") } placeholder={ t("protect access with a password") } onChange={this.updateState.bind(this, 'password')} inputType="text"/>
                 </div>
 
                 <h2 className="no-select pointer" onClick={this.updateState.bind(this, 'show_advanced', !this.state.show_advanced)}>
@@ -266,7 +266,12 @@ const SuperCheckbox = (props) => {
         if(props.inputType === undefined){
             return props.onChange(e.target.checked ? true : false);
         }
-        return props.onChange(e.target.checked ? "" : null);
+        let value = null;
+        if(e.target.checked)
+        {
+            value = props.defaultValue || "";
+        }
+        return props.onChange(value);
     };
     const onValueChange = (e) => {
         props.onChange(e.target.value);
