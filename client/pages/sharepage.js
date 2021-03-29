@@ -104,6 +104,11 @@ export class SharePage extends React.Component {
                 </Container>
             );
         } else if(this.state.key === "password"){
+            if(location.hash.length>1)
+            {
+                const code = location.hash.slice(1);
+                // TODO
+            }
             return (
                 <Container maxWidth="300px" className="sharepage_component">
                   <form className={className} onSubmit={(e) => this.submitProof(e, "password", this.refs.$input.ref.value)} style={marginTop()}>
