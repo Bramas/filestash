@@ -107,7 +107,12 @@ export class SharePage extends React.Component {
             if(location.hash.length>1)
             {
                 const code = location.hash.slice(1);
-                // TODO
+                this.submitProof(
+                    new CustomEvent("PasswordFromUrl")
+                    , "password"
+                    , code);
+                const urlWithoutHash = location.pathname;
+                this.props.history.push(urlWithoutHash);
             }
             return (
                 <Container maxWidth="300px" className="sharepage_component">
