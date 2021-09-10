@@ -281,7 +281,7 @@ func (s S3Backend) Rm(path string) error {
 }
 
 func (s S3Backend) Mv(from string, to string) error {
-	f := s.urlEncodedPath(from)
+	f := s.path(from)
 	t := s.path(to)
 	client := s3.New(s.createSession(f.bucket))
 
@@ -292,7 +292,7 @@ func (s S3Backend) Mv(from string, to string) error {
 		// Move Single file
 		input := &s3.CopyObjectInput{
 			Bucket:     aws.String(t.bucket),
-			CopySource: aws.String(f.bucket + "/" + f.path),
+			CopySource: aws.String(f.bucket + "/" + s.urlEncodedPath(f.path)),
 			Key:        aws.String(t.path),
 		}
 		if s.params["encryption_key"] != "" {
@@ -322,7 +322,7 @@ func (s S3Backend) Mv(from string, to string) error {
 		},
 		func(objs *s3.ListObjectsV2Output, lastPage bool) bool {
 			for _, obj := range objs.Contents {
-				from := f.bucket + "/" + *obj.Key
+				from := f.bucket + "/" + s.urlEncodedPath(*obj.Key)
 				toKey := t.path + strings.TrimPrefix(*obj.Key, f.path)
 				input := &s3.CopyObjectInput{
 					CopySource: aws.String(from),
@@ -464,23 +464,14 @@ func (s S3Backend) path(p string) S3Path {
 	}
 }
 
-func (s S3Backend) urlEncodedPath(p string) S3Path {
-	sp := strings.Split(p, "/")
-	bucket := ""
-	if len(sp) > 1 {
-		bucket = sp[1]
-	}
-	path := ""
-	if len(sp) > 2 {
-		var pathElements []string
-		for _, x := range sp[2:] {
-			pathElements = append(pathElements, url.QueryEscape(x))
-		}
-		path = strings.Join(pathElements, "/")
+func (s S3Backend) urlEncodedPath(path string) string {
+	sp := strings.Split(path, "/")
+	
+	var pathElements []string
+	for _, x := range sp {
+		pathElements = append(pathElements, url.QueryEscape(x))
 	}
 
-	return S3Path{
-		bucket,
-		path,
-	}
+	encodedPath := strings.Join(pathElements, "/")
+	return encodedPath
 }
