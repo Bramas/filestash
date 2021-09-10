@@ -340,13 +340,6 @@ func FileSave(ctx App, res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	maxMemory := int64(32 << 20) // 32MB
-	err = req.ParseMultipartForm(maxMemory)
-    if err != nil {
-		SendErrorResult(res, err)
-		return
-    }
-
 	file, _, err := req.FormFile("file")
 	if err != nil {
 		Log.Debug("save::form '%s'", err.Error())

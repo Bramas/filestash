@@ -238,7 +238,6 @@ export class UploadQueue extends React.Component {
                 running: true,
                 error: null
             });
-            Promise.all(Array.apply(null, Array(this.maxPoolSize())).map(() => {
             Promise.all(Array.apply(null, Array(window.CONFIG["upload_pool_size"])).map(() => {
                 return this.runner();
             })).then(() => {
