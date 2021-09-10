@@ -3,6 +3,7 @@ package plg_backend_s3
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -280,7 +281,7 @@ func (s S3Backend) Rm(path string) error {
 }
 
 func (s S3Backend) Mv(from string, to string) error {
-	f := s.path(from)
+	f := s.urlEncodedPath(from)
 	t := s.path(to)
 	client := s3.New(s.createSession(f.bucket))
 
@@ -389,6 +390,27 @@ func (s S3Backend) path(p string) S3Path {
 	path := ""
 	if len(sp) > 2 {
 		path = strings.Join(sp[2:], "/")
+	}
+
+	return S3Path{
+		bucket,
+		path,
+	}
+}
+
+func (s S3Backend) urlEncodedPath(p string) S3Path {
+	sp := strings.Split(p, "/")
+	bucket := ""
+	if len(sp) > 1 {
+		bucket = sp[1]
+	}
+	path := ""
+	if len(sp) > 2 {
+		var pathElements []string
+		for _, x := range sp[2:] {
+			pathElements = append(pathElements, url.QueryEscape(x))
+		}
+		path = strings.Join(pathElements, "/")
 	}
 
 	return S3Path{
