@@ -4,7 +4,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	. "github.com/mickael-kerjean/filestash/server/common"
-	"github.com/secsy/goftp"
+	//"github.com/secsy/goftp" <- FTP issue with microsoft FTP
+	"github.com/prasad83/goftp"
 	"io"
 	"os"
 	"regexp"
@@ -99,9 +100,9 @@ func (f Ftp) LoginForm() Form {
 	return Form{
 		Elmnts: []FormElement{
 			FormElement{
-				Name:        "type",
-				Type:        "hidden",
-				Value:       "ftp",
+				Name:  "type",
+				Type:  "hidden",
+				Value: "ftp",
 			},
 			FormElement{
 				Name:        "hostname",

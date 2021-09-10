@@ -29,7 +29,7 @@ steps:
   - cp -R ./dist/data/public ./filestash/data/public
 
 - name: build_backend
-  image: golang:1.12-stretch
+  image: golang:1.14-stretch
   depends_on: [ build_prepare ]
   environment:
     CGO_LDFLAGS_ALLOW: "-fopenmp"
@@ -50,7 +50,7 @@ steps:
       from_secret: GIT_PASSWORD
   commands:
   - apk add git > /dev/null
-  - git clone "https://readonly:$PASSWORD@git.kerjean.me/filestash/test.git"
+  - git clone https://mickael-kerjean:$PASSWORD@github.com/mickael-kerjean/filestash-test test
   - chmod -R 777 ./test/
 
 - name: test_frontend
@@ -62,7 +62,7 @@ steps:
   - npm test
 
 - name: test_backend_unit
-  image: golang:1.12-alpine
+  image: golang:1.14-alpine
   depends_on: [ test_prepare, build_backend, build_frontend ]
   environment:
     GO111MODULE: "on"
@@ -89,7 +89,8 @@ steps:
   image: debian:stable-slim
   depends_on: [ test_frontend, test_backend_unit, test_e2e ]
   when:
-    branch: master
+    branch:
+    - master
   environment:
     GPG_PASSPHRASE:
       from_secret: GPG_PASSPHRASE
@@ -105,7 +106,8 @@ steps:
   image: appleboy/drone-scp
   depends_on: [ release_prepare ]
   when:
-    branch: master
+    branch:
+    - master
   settings:
     command_timeout: 30m
     host: rick.kerjean.me
@@ -121,7 +123,8 @@ steps:
   image: plugins/docker
   depends_on: [ release_publish ]
   when:
-    branch: master
+    branch:
+    - master
   settings:
     dockerfile: ./docker/Dockerfile
     repo: machines/filestash
@@ -135,9 +138,10 @@ steps:
 
 - name: deployment
   image: quay.io/honestbee/drone-kubernetes
-  depends_on: [ release_publish ]
+  depends_on: [ release_docker ]
   when:
-    branch: master
+    branch:
+    - master
   kubernetes_server: ${KUBERNETES_SERVER}
   kubernetes_cert: ${KUBERNETES_CERT}
   kubernetes_token: ${KUBERNETES_TOKEN}
@@ -152,7 +156,8 @@ steps:
   failure: ignore
   depends_on: [ release_docker ]
   when:
-    branch: master
+    branch:
+    - master
   settings:
     prefix: build
     nick: blipblip
