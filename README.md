@@ -1,9 +1,9 @@
 This is a fork of [https://github.com/mickael-kerjean/filestash](https://github.com/mickael-kerjean/filestash)
-it contains the last features made by me (and some of them included in mickael-kerjean/filestash)
-To have the last development version (that I use for my files) => get this docker image `bramas/filestash-dev:latest`
+it contains the last features made by me (some of them are already merged in mickael-kerjean/filestash)
+To have the last development version (that I use for my own files) => get this docker image `bramas/filestash-dev:latest`
 
 
-Build status of this repo : [![Build Status](https://cloud.drone.io/api/badges/Bramas/filestash/status.svg)](https://cloud.drone.io/Bramas/filestash)
+Build status of this repo : [![Build Status](https://cloud.drone.io/api/badges/Bramas/filestash/status.svg?ref=refs/heads/bramas-dev)](https://cloud.drone.io/Bramas/filestash)
 
 
 
