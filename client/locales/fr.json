@@ -32,6 +32,8 @@
     "DOESNT_MATCH": "ne correspond pas",
     "DONE": "terminé",
     "DOWNLOAD": "Télécharger",
+    "DOWNLOAD_DIRECTORY": "Télécharger Dossier",
+    "DOWNLOAD_DIRECTORY::SHORT": "Tél. Dossier",
     "DROP_HERE_TO_UPLOAD": "glisser-déposer pour charger vos fichiers et dossiers",
     "EDITOR": "éditeur",
     "EXISTING_LINKS": "liens existants",
