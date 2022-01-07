@@ -2,11 +2,14 @@ const webpack = require("webpack");
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 // const BundleAnalyzerPlugin = require("webpack-bundle-analyzer").BundleAnalyzerPlugin;
-const UglifyJSPlugin = require("uglifyjs-webpack-plugin");
+const TerserPlugin = require("terser-webpack-plugin");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const CompressionPlugin = require("compression-webpack-plugin");
 
+process.env.NODE_ENV = process.env.NODE_ENV || 'development'
+
 const config = {
+    mode: process.env.NODE_ENV,
     entry: {
         app: path.join(__dirname, "client", "index.js"),
     },
@@ -33,15 +36,15 @@ const config = {
             },
             {
                 test: /\.scss$/,
-                loaders: ["style-loader", "css-loader", "sass-loader"],
+                use: ["style-loader", "css-loader", "sass-loader"],
             },
             {
                 test: /\.css$/,
-                loaders: ["style-loader", "css-loader"],
+                use: ["style-loader", "css-loader"],
             },
             {
                 test: /\.(pdf|jpg|png|gif|svg|ico|woff|woff2|eot|ttf)$/,
-                loader: "url-loader",
+                loader: "url-loader"
             },
             {
                 test: /[a-z]+\.worker\.js$/,
@@ -54,7 +57,6 @@ const config = {
         new webpack.DefinePlugin({
             "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
         }),
-        new webpack.optimize.OccurrenceOrderPlugin(),
         new HtmlWebpackPlugin({
             template: path.join(__dirname, "client", "index.html"),
             inject: true,
@@ -65,43 +67,52 @@ const config = {
                 minifyCSS: true,
             },
         }),
-        new CopyWebpackPlugin([
-            { from: "locales/*.json", to: "assets/" },
-            { from: "manifest.json", to: "assets/" },
-            { from: "worker/*.js", to: "assets/" },
-            { from: "assets/logo/*" },
-            { from: "assets/icons/*" },
-            { from: "assets/fonts/*" },
-        ], { context: path.join(__dirname, "client") }),
-        new CopyWebpackPlugin([
-            { from: "node_modules/pdfjs-dist/", to: "assets/vendor/pdfjs/2.6.347/" },
-        ]),
+        new CopyWebpackPlugin({
+                patterns: [
+                    { from: "client/locales/*.json", to: "client/assets/" },
+                    { from: "client/manifest.json", to: "client/assets/" },
+                    { from: "client/worker/*.js", to: "client/assets/" },
+                    { from: "client/assets/logo/*" },
+                    { from: "client/assets/icons/*" },
+                    { from: "client/assets/fonts/*" },
+                ]
+            }
+        ),
+            new CopyWebpackPlugin({
+                patterns: [
+                    { 
+                        from: "node_modules/pdfjs-dist/", 
+                        to: "assets/vendor/pdfjs/2.6.347/" 
+                    }
+                ]
+            }),
         // new BundleAnalyzerPlugin()
     ],
 };
 
 
 if (process.env.NODE_ENV === "production") {
-    config.plugins.push(new UglifyJSPlugin({
-        sourceMap: false,
-        extractComments: true,
-    }));
+    config.optimization = {
+        minimize: true,
+        minimizer: [new TerserPlugin()],
+    }
+
     config.plugins.push(new CompressionPlugin({
-        asset: "[path].gz[query]",
+        filename: "[path][base].gz[query]",
         algorithm: "gzip",
         test: /\.js$|\.json$|\.html$|\.svg|\.ico$/,
         threshold: 0,
         minRatio: 0.8,
     }));
     config.plugins.push(new CompressionPlugin({
-        asset: "[path].br[query]",
+        filename: "[path][base].br[query]",
         algorithm: "brotliCompress",
         test: /\.js$|\.json$|\.html$|\.svg|\.ico$/,
         threshold: 0,
         minRatio: 0.8,
     }));
 } else {
-    config.devtool = "#inline-source-map";
+    config.devtool = "eval";
 }
 
 module.exports = config;
