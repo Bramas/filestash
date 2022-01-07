@@ -2,12 +2,6 @@ package plg_backend_s3
 
 import (
 	"fmt"
-	"io"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strings"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -17,6 +11,11 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	. "github.com/mickael-kerjean/filestash/server/common"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 var S3Cache AppCache
@@ -481,9 +480,10 @@ func (s S3Backend) path(p string) S3Path {
 	}
 }
 
+
 func (s S3Backend) urlEncodedPath(path string) string {
 	sp := strings.Split(path, "/")
-	
+
 	var pathElements []string
 	for _, x := range sp {
 		pathElements = append(pathElements, url.QueryEscape(x))
