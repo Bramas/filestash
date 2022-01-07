@@ -112,6 +112,7 @@ export class ExistingThing extends React.Component {
     shouldComponentUpdate(nextProps, nextState){
         if(nextState.hover !== this.state.hover ||
            nextState.is_renaming !== this.state.is_renaming ||
+           nextState.touched !== this.state.touched ||
            nextProps.view !== this.props.view ||
            this.state.preview !== nextState.preview ||
            this.props.fileIsOver !== nextProps.fileIsOver ||
@@ -217,6 +218,10 @@ export class ExistingThing extends React.Component {
         }
     }
 
+    onThingTouch(e) {
+        this.setState({touched: true});
+    }
+
     _confirm_delete_text(){
         return this.props.file.name.length > 16? this.props.file.name.substring(0, 10).toLowerCase() : this.props.file.name;
     }
@@ -248,8 +253,8 @@ export class ExistingThing extends React.Component {
             .replace(/\#/g, "%23");
 
         return connectDragSource(connectDropNativeFile(connectDropFile(
-            <div className={"component_thing view-"+this.props.view+(this.props.selected === true ? " selected" : " not-selected")}>
-              <ToggleableLink onClick={this.onThingClick.bind(this)} to={fileLink + window.location.search} disabled={this.props.file.icon === "loading"}>
+            <div className={"component_thing view-"+this.props.view+(this.props.selected === true ? " selected" : " not-selected")+(this.state.touched ? " show-actions" : "")}>
+              <ToggleableLink onTouchStart={this.onThingTouch.bind(this)} onClick={this.onThingClick.bind(this)} to={fileLink + window.location.search} disabled={this.props.file.icon === "loading"}>
                 <Card ref="$card"className={this.state.hover} className={className}>
                   <Image preview={this.state.preview}
                          icon={this.props.file.icon || this.props.file.type}
