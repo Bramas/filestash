@@ -1,17 +1,11 @@
-FROM golang:1.14-stretch
+FROM golang:1.16-stretch
+
+ENV CGO_LDFLAGS_ALLOW=-fopenmp
+ENV GO111MODULE=on
 
 
+RUN apt-get update > /dev/null && apt-get install -y libglib2.0-dev curl make > /dev/null
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-		libglib2.0-dev \ 
-		curl \
-		make
-
-RUN curl -sL https://deb.nodesource.com/setup_15.x | bash - \
-	&& apt-get install -y nodejs \
-	&& curl -L https://www.npmjs.com/install.sh | sh
-
-# ENV PATH="/usr/local/go/bin:${PATH}"
 
 VOLUME /var/app
 WORKDIR /var/app
