@@ -40,20 +40,24 @@ func (s S3Backend) Init(params map[string]string, app *App) (IBackend, error) {
 	if params["region"] == "" {
 		params["region"] = "us-east-2"
 	}
+	creds := []credentials.Provider{}
+	if params["access_key_id"] != "" || params["secret_access_key"] != "" {
+		creds = append(creds, &credentials.StaticProvider{Value: credentials.Value{
+			AccessKeyID:     params["access_key_id"],
+			SecretAccessKey: params["secret_access_key"],
+			SessionToken:    params["session_token"],
+		}})
+	}
+	creds = append(
+		creds,
+		&ec2rolecreds.EC2RoleProvider{Client: ec2metadata.New(session.Must(session.NewSession()))},
+		&credentials.EnvProvider{},
+	)
 	config := &aws.Config{
-		Credentials: credentials.NewChainCredentials(
-			[]credentials.Provider{
-				&credentials.StaticProvider{Value: credentials.Value{
-					AccessKeyID:     params["access_key_id"],
-					SecretAccessKey: params["secret_access_key"],
-					SessionToken:    params["session_token"],
-				}},
-				&credentials.EnvProvider{},
-				&ec2rolecreds.EC2RoleProvider{Client: ec2metadata.New(session.Must(session.NewSession()))},
-			},
-		),
-		S3ForcePathStyle: aws.Bool(true),
-		Region:           aws.String(params["region"]),
+		Credentials:                   credentials.NewChainCredentials(creds),
+		CredentialsChainVerboseErrors: aws.Bool(true),
+		S3ForcePathStyle:              aws.Bool(true),
+		Region:                        aws.String(params["region"]),
 	}
 	if params["endpoint"] != "" {
 		config.Endpoint = aws.String(params["endpoint"])
@@ -300,14 +304,12 @@ func (s S3Backend) Mv(from string, to string) error {
 	}
 	client := s3.New(s.createSession(f.bucket))
 
-	if f.path == "" {
-		// Rename bucket
+	if f.path == "" { // Rename bucket
 		return ErrNotImplemented
-	} else if strings.HasSuffix(from, "/") == false {
-		// Move Single file
+	} else if strings.HasSuffix(from, "/") == false { // Move Single file
 		input := &s3.CopyObjectInput{
 			Bucket:     aws.String(t.bucket),
-			CopySource: aws.String(f.bucket + "/" + s.urlEncodedPath(f.path)),
+			CopySource: aws.String(fmt.Sprintf("%s/%s", f.bucket, f.path)),
 			Key:        aws.String(t.path),
 		}
 		if s.params["encryption_key"] != "" {
@@ -327,7 +329,6 @@ func (s S3Backend) Mv(from string, to string) error {
 		})
 		return err
 	}
-
 	// Move recursively files and subfolders
 	err := client.ListObjectsV2Pages(
 		&s3.ListObjectsV2Input{
@@ -337,7 +338,7 @@ func (s S3Backend) Mv(from string, to string) error {
 		},
 		func(objs *s3.ListObjectsV2Output, lastPage bool) bool {
 			for _, obj := range objs.Contents {
-				from := f.bucket + "/" + s.urlEncodedPath(*obj.Key)
+				from := fmt.Sprintf("%s/%s", f.bucket, *obj.Key)
 				toKey := t.path + strings.TrimPrefix(*obj.Key, f.path)
 				input := &s3.CopyObjectInput{
 					CopySource: aws.String(from),
@@ -372,8 +373,8 @@ func (s S3Backend) Mv(from string, to string) error {
 				}
 			}
 			for _, pref := range objs.CommonPrefixes {
-				from := "/" + f.bucket + "/" + *pref.Prefix
-				to := "/" + t.bucket + "/" + t.path + "/" + strings.TrimPrefix(*pref.Prefix, f.path)
+				from := fmt.Sprintf("/%s/%s", f.bucket, *pref.Prefix)
+				to := fmt.Sprintf("/%s/%s/%s", t.bucket, t.path, strings.TrimPrefix(*pref.Prefix, f.path))
 				Log.Debug("Mv(%s, %s):", from, to)
 				err := s.Mv(from, to)
 				if err != nil {
@@ -382,7 +383,8 @@ func (s S3Backend) Mv(from string, to string) error {
 				}
 			}
 			return true
-		})
+		},
+	)
 	if err != nil {
 		Log.Error("ListObjectsV2Pages failed:", err)
 	}

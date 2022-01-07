@@ -1,5 +1,6 @@
 .component_page_admin{
     display: flex;
+    .adminpage { max-width: 1400px; }
     .page_container{
         width: 100%;
         background: var(--super-light);
@@ -101,7 +102,7 @@
     transition-delay: 0.7s;
     h2{
         font-family: 'Source Code Pro', monospace;
-        color: var(--primary);
+        color: white;
         font-weight: 300;
         font-size: 1.5em;
         margin: 25px 0 40px 0;
@@ -116,7 +117,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
             a.active, a:hover{
-                color: var(--primary);
+                color: white;
             }
         }
     }
