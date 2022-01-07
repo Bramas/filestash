@@ -33,6 +33,12 @@
             vertical-align: middle;
         }
     }
+    .file_count {
+        float: right;
+        display: inline-block;
+        margin: 0px 15px 0 5px;
+        line-height: 28px;
+    }
     .component_saving{
         padding-left: 1px;
     }

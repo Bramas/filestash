@@ -4,6 +4,7 @@ import PropTypes from "prop-types";
 import { Link } from "react-router-dom";
 import { NgIf, Icon, EventEmitter } from "./";
 import ReactCSSTransitionGroup from "react-addons-css-transition-group";
+import { t } from '../locales/';
 
 import "./breadcrumb.scss";
 
@@ -59,6 +60,9 @@ export class BreadCrumb extends React.Component {
             <div className="component_breadcrumb" role="navigation">
                 <BreadCrumbContainer className={this.props.className + " no-select"}>
                     <Logout />
+                    <span className="file_count">
+                    { this.props.fileCount + ' ' + t("Element(s)") }
+                    </span>
                     <ReactCSSTransitionGroup transitionName="breadcrumb" transitionLeave={true}
                         transitionEnter={true} transitionLeaveTimeout={150}
                         transitionEnterTimeout={200} transitionAppear={false}>

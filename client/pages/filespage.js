@@ -259,7 +259,7 @@ export class FilesPage extends React.Component {
         }
         return (
             <div className="component_page_filespage">
-              <BreadCrumb className="breadcrumb" path={this.state.path} currentSelection={this.state.selected} />
+              <BreadCrumb className="breadcrumb" path={this.state.path} currentSelection={this.state.selected} fileCount={this.state.files.length} />
               <SelectableGroup onSelection={this.handleMultiSelect.bind(this)} tolerance={2} onNonItemClick={this.handleMultiSelect.bind(this, [])} preventDefault={true} enabled={this.state.is_search === false} className="selectablegroup">
                 <div className="page_container">
                   <div ref="$scroll" className="scroll-y">
@@ -269,7 +269,16 @@ export class FilesPage extends React.Component {
                         <NgIf cond={this.state.path === "/" && window.self === window.top}>
                           <FrequentlyAccess files={this.state.frequents} />
                         </NgIf>
-                        <Submenu path={this.state.path} sort={this.state.sort} view={this.state.view} onSearch={this.onSearch.bind(this)} onViewUpdate={(value) => this.onView(value)} onSortUpdate={(value) => this.onSort(value)} accessRight={this.state.metadata || {}} selected={this.state.selected}></Submenu>
+                        <Submenu 
+                            path={this.state.path} 
+                            sort={this.state.sort} 
+                            view={this.state.view} 
+                            onSearch={this.onSearch.bind(this)} 
+                            onViewUpdate={(value) => this.onView(value)} 
+                            onSortUpdate={(value) => this.onSort(value)} 
+                            accessRight={this.state.metadata || {}} 
+                            selected={this.state.selected}
+                            ></Submenu>
                         <NgIf cond={!this.state.loading}>
                           <FileSystem path={this.state.path} sort={this.state.sort} view={this.state.view} selected={this.state.selected}
                                       files={this.state.files.slice(0, this.state.page_number * LOAD_PER_SCROLL)} isSearch={this.state.is_search}
