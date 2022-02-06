@@ -22,8 +22,27 @@ type IBackend interface {
 
 type IAuth interface {
 	Setup() Form
-	EntryPoint(req *http.Request, res http.ResponseWriter)
+	EntryPoint(idpParams map[string]string, req *http.Request, res http.ResponseWriter) error
 	Callback(formData map[string]string, idpParams map[string]string, res http.ResponseWriter) (map[string]string, error)
+}
+
+type IAuthorisation interface {
+	Ls(ctx App, path string) error
+	Cat(ctx App, path string) error
+	Mkdir(ctx App, path string) error
+	Rm(ctx App, path string) error
+	Mv(ctx App, from string, to string) error
+	Save(ctx App, path string) error
+	Touch(ctx App, path string) error
+}
+
+type IFile interface {
+	os.FileInfo
+	Path() string
+}
+
+type ISearch interface {
+	Query(ctx App, basePath string, term string) ([]IFile, error)
 }
 
 type File struct {
@@ -63,6 +82,10 @@ func (f File) IsDir() bool {
 }
 func (f File) Sys() interface{} {
 	return nil
+}
+
+func (f File) Path() string {
+	return f.FPath
 }
 
 type Metadata struct {

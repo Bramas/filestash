@@ -1,13 +1,16 @@
 package ctrl
 
 import (
+	"bytes"
 	"encoding/json"
 	"github.com/gorilla/mux"
 	. "github.com/mickael-kerjean/filestash/server/common"
 	. "github.com/mickael-kerjean/filestash/server/middleware"
 	"github.com/mickael-kerjean/filestash/server/model"
 	"net/http"
+	"net/url"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -83,15 +86,31 @@ func SessionAuthenticate(ctx App, res http.ResponseWriter, req *http.Request) {
 		SendErrorResult(res, NewError(err.Error(), 500))
 		return
 	}
-	http.SetCookie(res, &http.Cookie{
-		Name:     COOKIE_NAME_AUTH,
-		Value:    obfuscate,
-		MaxAge:   60 * Config.Get("general.cookie_timeout").Int(),
-		Path:     COOKIE_PATH,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
-
+	// split session cookie if greater than 3800 bytes
+	value_limit := 3800
+	index := 0
+	end := 0
+	for {
+		if len(obfuscate) >= (index+1)*value_limit {
+			end = (index + 1) * value_limit
+		} else {
+			end = len(obfuscate)
+		}
+		http.SetCookie(res, &http.Cookie{
+			Name:     CookieName(index),
+			Value:    obfuscate[index*value_limit : end],
+			MaxAge:   60 * Config.Get("general.cookie_timeout").Int(),
+			Path:     COOKIE_PATH,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+		if end == len(obfuscate) {
+			break
+		} else {
+			Log.Debug("session::auth obfuscate index: %d length: %d total: %d", index, len(obfuscate[index*value_limit:end]), len(obfuscate))
+			index++
+		}
+	}
 	if home != "" {
 		SendSuccessResult(res, home)
 		return
@@ -115,12 +134,20 @@ func SessionLogout(ctx App, res http.ResponseWriter, req *http.Request) {
 			}
 		})(ctx, res, req)
 	}()
-	http.SetCookie(res, &http.Cookie{
-		Name:   COOKIE_NAME_AUTH,
-		Value:  "",
-		MaxAge: -1,
-		Path:   COOKIE_PATH,
-	})
+	index := 0
+	for {
+		_, err := req.Cookie(CookieName(index))
+		if err != nil {
+			break
+		}
+		http.SetCookie(res, &http.Cookie{
+			Name:   CookieName(index),
+			Value:  "",
+			MaxAge: -1,
+			Path:   COOKIE_PATH,
+		})
+		index++
+	}
 	http.SetCookie(res, &http.Cookie{
 		Name:   COOKIE_NAME_ADMIN,
 		Value:  "",
@@ -153,11 +180,24 @@ func SessionOAuthBackend(ctx App, res http.ResponseWriter, req *http.Request) {
 		SendErrorResult(res, ErrNotSupported)
 		return
 	}
-	if strings.Contains(req.Header.Get("Accept"), "text/html") {
-		http.Redirect(res, req, obj.OAuthURL(), http.StatusSeeOther)
+	redirectUrl, err := url.Parse(obj.OAuthURL())
+	if err != nil {
+		Log.Debug("session::oauth 'Parse URL - \"%s\"'", a["type"])
+		SendErrorResult(res, ErrNotValid)
 		return
 	}
-	SendSuccessResult(res, obj.OAuthURL())
+	stateValue := vars["service"]
+	if req.URL.Query().Get("next") != "" {
+		stateValue += "::" + req.URL.Query().Get("next")
+	}
+	q := redirectUrl.Query()
+	q.Set("state", stateValue)
+	redirectUrl.RawQuery = q.Encode()
+	if strings.Contains(req.Header.Get("Accept"), "text/html") {
+		http.Redirect(res, req, redirectUrl.String(), http.StatusSeeOther)
+		return
+	}
+	SendSuccessResult(res, redirectUrl.String())
 }
 
 func SessionAuthMiddleware(ctx App, res http.ResponseWriter, req *http.Request) {
@@ -170,7 +210,7 @@ func SessionAuthMiddleware(ctx App, res http.ResponseWriter, req *http.Request) 
 		if selectedPluginId == "" {
 			return nil
 		}
-		for key, plugin := range Hooks.All.AuthenticationMiddleware() {
+		for key, plugin := range Hooks.Get.AuthenticationMiddleware() {
 			if key == selectedPluginId {
 				return plugin
 			}
@@ -210,26 +250,6 @@ func SessionAuthMiddleware(ctx App, res http.ResponseWriter, req *http.Request) 
 			formData[key] = values[0]
 		}
 	}
-
-	// Step1: Entrypoint of the authentication process is handled by the plugin
-	if req.Method == "GET" && _get.Get("action") == "redirect" {
-		if label := _get.Get("label"); label != "" {
-			http.SetCookie(res, &http.Cookie{
-				Name:     SSOCookieName,
-				Value:    label,
-				MaxAge:   60 * 10,
-				Path:     COOKIE_PATH,
-				HttpOnly: true,
-				SameSite: http.SameSiteStrictMode,
-			})
-		}
-		plugin.EntryPoint(req, res)
-		return
-	}
-
-	// Step2: End of the authentication process. Could come from:
-	// - target of a html form. eg: ldap, mysql, ...
-	// - identity provider redirection uri. eg: oauth2, openid, ...
 	idpParams := map[string]string{}
 	if err := json.Unmarshal(
 		[]byte(Config.Get("middleware.identity_provider.params").String()),
@@ -243,13 +263,41 @@ func SessionAuthMiddleware(ctx App, res http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	templateBind, err := plugin.Callback(formData, idpParams, res)
-	if err != nil {
-		Log.Debug("session::authMiddleware 'callback error - %s'", err.Error())
-		http.Redirect(res, req, req.URL.Path+"?action=redirect", http.StatusSeeOther)
+	// Step1: Entrypoint of the authentication process is handled by the plugin
+	if req.Method == "GET" && _get.Get("action") == "redirect" {
+		if label := _get.Get("label"); label != "" {
+			http.SetCookie(res, &http.Cookie{
+				Name:     SSOCookieName,
+				Value:    label,
+				MaxAge:   60 * 10,
+				Path:     COOKIE_PATH,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+		}
+		if err := plugin.EntryPoint(idpParams, req, res); err != nil {
+			Log.Error("entrypoint - %s", err.Error())
+			res.Header().Set("Content-Type", "text/html; charset=utf-8")
+			res.WriteHeader(http.StatusOK)
+			res.Write([]byte(Page(err.Error())))
+		}
 		return
 	}
-	Log.Debug("session::authMiddleware 'template bind - \"%+v\"'", templateBind)
+
+	// Step2: End of the authentication process. Could come from:
+	// - target of a html form. eg: ldap, mysql, ...
+	// - identity provider redirection uri. eg: oauth2, openid, ...
+	templateBind, err := plugin.Callback(formData, idpParams, res)
+	if err != nil {
+		Log.Error("session::authMiddleware 'callback error - %s'", err.Error())
+		http.Redirect(
+			res,
+			req,
+			"/?error="+ErrNotAllowed.Error()+"&trace=redirect request failed - "+err.Error(),
+			http.StatusSeeOther,
+		)
+		return
+	}
 
 	// Step3: create a backend connection object
 	session, err := func(tb map[string]string) (map[string]string, error) {
@@ -266,7 +314,20 @@ func SessionAuthMiddleware(ctx App, res http.ResponseWriter, req *http.Request) 
 		}
 		mappingToUse := map[string]string{}
 		for k, v := range globalMapping[refCookie.Value] {
-			mappingToUse[k] = NewStringFromInterface(v)
+			str := NewStringFromInterface(v)
+			if str == "" {
+				continue
+			}
+			tmpl, err := template.New("ctrl::session::auth_middleware").Parse(str)
+			mappingToUse[k] = str
+			if err != nil {
+				continue
+			}
+			var b bytes.Buffer
+			if err = tmpl.Execute(&b, tb); err != nil {
+				continue
+			}
+			mappingToUse[k] = b.String()
 		}
 		mappingToUse["timestamp"] = time.Now().String()
 		return mappingToUse, nil
@@ -280,6 +341,7 @@ func SessionAuthMiddleware(ctx App, res http.ResponseWriter, req *http.Request) 
 		)
 		return
 	}
+
 	if _, err := model.NewBackend(&ctx, session); err != nil {
 		Log.Debug("session::authMiddleware 'backend connection failed %+v - %s'", session, err.Error())
 		http.Redirect(
@@ -317,7 +379,7 @@ func SessionAuthMiddleware(ctx App, res http.ResponseWriter, req *http.Request) 
 		MaxAge:   -1,
 		Path:     COOKIE_PATH,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(res, req, "/", http.StatusTemporaryRedirect)
 }

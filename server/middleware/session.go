@@ -256,11 +256,19 @@ func _extractSession(req *http.Request, ctx *App) (map[string]string, error) {
 		}
 		return session, err
 	} else {
-		cookie, err := req.Cookie(COOKIE_NAME_AUTH)
-		if err != nil {
+		str := ""
+		index := 0
+		for {
+			cookie, err := req.Cookie(CookieName(index))
+			if err != nil {
+				break
+			}
+			index++
+			str += cookie.Value
+		}
+		if str == "" {
 			return session, nil
 		}
-		str = cookie.Value
 		str, err = DecryptString(SECRET_KEY_DERIVATE_FOR_USER, str)
 		if err != nil {
 			// This typically happen when changing the secret key

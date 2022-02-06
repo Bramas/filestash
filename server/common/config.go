@@ -3,21 +3,17 @@ package common
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 var (
-	Config     Configuration
-	configPath string = filepath.Join(GetCurrentDir(), CONFIG_PATH+"config.json")
+	Config Configuration
 )
 
 type Configuration struct {
@@ -53,10 +49,8 @@ type FormElement struct {
 }
 
 func init() {
-	//PerformMigration()
 	Config = NewConfiguration()
 	Config.Load()
-	Config.Save()
 	Config.Initialise()
 }
 
@@ -208,16 +202,9 @@ func (this *Form) Iterator() []FormIterator {
 }
 
 func (this *Configuration) Load() {
-	file, err := os.OpenFile(configPath, os.O_RDONLY, os.ModePerm)
+	cFile, err := LoadConfig()
 	if err != nil {
-		Log.Warning("Can't read from config file")
-		return
-	}
-	defer file.Close()
-
-	cFile, err := ioutil.ReadAll(file)
-	if err != nil {
-		Log.Warning("Can't parse config file")
+		Log.Error("config::load %s", err)
 		return
 	}
 
@@ -285,13 +272,17 @@ func (this *Configuration) Debug() *FormElement {
 }
 
 func (this *Configuration) Initialise() {
+	shouldSave := false
 	if env := os.Getenv("ADMIN_PASSWORD"); env != "" {
+		shouldSave = true
 		this.Get("auth.admin").Set(env)
 	}
 	if env := os.Getenv("APPLICATION_URL"); env != "" {
+		shouldSave = true
 		this.Get("general.host").Set(env).String()
 	}
 	if this.Get("general.secret_key").String() == "" {
+		shouldSave = true
 		key := RandomString(16)
 		this.Get("general.secret_key").Set(key)
 	}
@@ -327,6 +318,9 @@ func (this *Configuration) Initialise() {
 				"label": "Drive",
 			},
 		}
+		shouldSave = true
+	}
+	if shouldSave {
 		this.Save()
 	}
 	InitSecretDerivate(this.Get("general.secret_key").String())
@@ -344,14 +338,9 @@ func (this Configuration) Save() Configuration {
 	})
 	v, _ = sjson.Set(v, "connections", this.Conn)
 
-	// deploy the config in our config.json
-	file, err := os.Create(configPath)
-	if err != nil {
-		Log.Error("Filestash needs to be able to create/edit its own configuration which it can't at the moment. Change the permission for filestash to create and edit `%s`", configPath)
-		return this
+	if err := SaveConfig(PrettyPrint([]byte(v))); err != nil {
+		Log.Error("config::save %s", err.Error())
 	}
-	defer file.Close()
-	file.Write(PrettyPrint([]byte(v)))
 	return this
 }
 
@@ -417,8 +406,8 @@ func (this *Configuration) Get(key string) *Configuration {
 							return &(*forms)[i].Elmnts[j]
 						}
 					}
-					// 2) `formElement` does not exist, let's create it
-					(*forms)[i].Elmnts = append(currentForm.Elmnts, FormElement{Name: path[1], Type: "text"})
+					// 2) `formElement` does not exist, let's create it.
+					(*forms)[i].Elmnts = append(currentForm.Elmnts, FormElement{Name: path[1], Type: "hidden"})
 					return &(*forms)[i].Elmnts[len(currentForm.Elmnts)]
 				} else {
 					// we are NOT on a leaf, let's continue our tree transversal
@@ -589,64 +578,4 @@ func (this *Configuration) UnlistenForChange(c ChangeListener) {
 type ChangeListener struct {
 	Id       string
 	Listener chan interface{}
-}
-
-func PerformMigration() (err error) {
-	Log.SetVisibility("DEBUG")
-	loadConfig := func() (string, error) {
-		file, err := os.OpenFile(configPath, os.O_RDONLY, os.ModePerm)
-		if err != nil {
-			Log.Stdout("BOOT Can't read config file")
-			return "", ErrFilesystemError
-		}
-		defer file.Close()
-		cFile, err := ioutil.ReadAll(file)
-		if err != nil {
-			Log.Stdout("BOOT Can't parse config file")
-			return "", ErrFilesystemError
-		}
-		return string(cFile), nil
-	}
-	saveConfig := func(version int, content string) (err error) {
-		content, err = sjson.Set(content, "constant.schema", version)
-		if err != nil {
-			Log.Stdout("BOOT Migration failed on schema key")
-			return err
-		}
-		file, err := os.Create(configPath)
-		if err != nil {
-			Log.Stdout("BOOT Can't create config file")
-			return ErrFilesystemError
-		}
-		file.Write(PrettyPrint([]byte(content)))
-		file.Close()
-		return nil
-	}
-
-	jsonStr, err := loadConfig()
-	if err != nil {
-		return err
-	}
-	schemaVersion := int(gjson.Get(jsonStr, "constant.schema").Int())
-	if schemaVersion == 0 {
-		Log.Stdout("BOOT Migrate config v%d -> v%d", schemaVersion, schemaVersion+1)
-		if jsonStr, err = sjson.Delete(jsonStr, "general.remember_me"); err != nil {
-			Log.Stdout("BOOT Migration error: remember_me")
-			return err
-		}
-		if jsonStr, err = sjson.Delete(jsonStr, "general.hide_menubar"); err != nil {
-			Log.Stdout("BOOT Migration error: hide_menubar")
-			return err
-		}
-		if jsonStr, err = sjson.Delete(jsonStr, "features.protection.iframe"); err != nil {
-			Log.Stdout("BOOT Migration error: features.protection.iframe")
-			return err
-		}
-		if err = saveConfig(schemaVersion+1, jsonStr); err != nil {
-			Log.Stdout("BOOT Couldn't save config")
-			return err
-		}
-		return PerformMigration()
-	}
-	return nil
 }

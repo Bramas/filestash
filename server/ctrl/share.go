@@ -41,11 +41,18 @@ func ShareUpsert(ctx App, res http.ResponseWriter, req *http.Request) {
 		Id: share_id,
 		Auth: func() string {
 			if ctx.Share.Id == "" {
-				a, err := req.Cookie(COOKIE_NAME_AUTH)
-				if err != nil {
-					return ""
+				str := ""
+				index := 0
+				for {
+
+					cookie, err := req.Cookie(CookieName(index))
+					if err != nil {
+						break
+					}
+					index++
+					str += cookie.Value
 				}
-				return a.Value
+				return str
 			}
 			return ctx.Share.Auth
 		}(),
