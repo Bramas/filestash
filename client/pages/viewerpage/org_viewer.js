@@ -1,10 +1,10 @@
 import React from "react";
 import { StickyContainer, Sticky } from "react-sticky";
 
-import { Modal, NgIf, Icon, Dropdown, DropdownButton, DropdownList, DropdownItem } from "../../components/";
+import { Modal, NgIf, Icon, Dropdown, DropdownButton, DropdownList, DropdownItem, Input } from "../../components/";
 import { extractEvents, extractTodos } from "../../helpers/org";
 import { leftPad } from "../../helpers/common";
-import { debounce } from "../../helpers/";
+import { debounce, randomString } from "../../helpers/";
 import { t } from "../../locales/";
 import "./org_viewer.scss";
 
@@ -53,9 +53,7 @@ class OrgViewer extends React.Component {
             search: "",
             _: null,
         };
-        this.rerender = () => {
-            this.setState({ _: Math.random() });
-        };
+        this.rerender = () => this.setState({ _: randomString() });
         this.findResults = debounce(this.findResults.bind(this), 150);
     }
 
@@ -492,7 +490,7 @@ class Subtask extends React.Component {
         return (
             <div className="component_subtask no-select">
                 <label>
-                    <input type="checkbox" checked={this.state.checked}
+                    <Input type="checkbox" checked={this.state.checked}
                         onChange={this.updateState.bind(this)} />
                     <span>{this.props.label}</span>
                 </label>

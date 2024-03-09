@@ -2,7 +2,7 @@
 
 import {
     http_get, http_post, http_options, prepare, basename, dirname, pathBuilder,
-    currentShare, appendShareToUrl,
+    filetype, currentShare, currentBackend, appendShareToUrl,
 } from "../helpers/";
 
 import { Observable } from "rxjs/Observable";
@@ -29,9 +29,7 @@ class FileSystem {
                             if (keep_pulling_from_http === false) return Promise.resolve();
                             return fetch_from_http(_path);
                         }).catch((err) => {
-                            if (cache === null) {
-                                this.obs && this.obs.error({ message: "Unknown Path" });
-                            }
+                            this.obs && this.obs.error(err);
                         });
                 };
                 fetch_from_http(path);
@@ -48,16 +46,17 @@ class FileSystem {
         return http_get(url).then((response) => {
             response = fileMiddleware(response, path, show_hidden);
 
-            return cache.upsert(cache.FILE_PATH, [currentShare(), path], (_files) => {
+            return cache.upsert(cache.FILE_PATH, [currentBackend(), currentShare(), path], (_files) => {
                 const store = Object.assign({
+                    backend: currentBackend(),
                     share: currentShare(),
                     status: "ok",
                     path: path,
                     results: null,
                     access_count: 0,
-                    metadata: null,
+                    permissions: null,
                 }, _files);
-                store.metadata = response.metadata;
+                store.permissions = response.permissions;
                 store.results = response.results;
 
                 if (_files && _files.results) {
@@ -90,35 +89,32 @@ class FileSystem {
                 return Promise.resolve(null);
             });
         }).catch((_err) => {
-            if (_err.code === "Unauthorized") {
-                location = "/login?next=" + location.pathname;
-            }
             this.obs.next(_err);
             return Promise.reject(_err);
         });
     }
 
     _ls_from_cache(path, _record_access = false) {
-        return cache.get(cache.FILE_PATH, [currentShare(), path]).then((response) => {
+        return cache.get(cache.FILE_PATH, [currentBackend(), currentShare(), path]).then((response) => {
             if (!response || !response.results) return null;
             if (this.current_path === path) {
                 this.obs && this.obs.next({
                     status: "ok",
                     results: response.results,
-                    metadata: response.metadata,
+                    permissions: response.permissions,
                 });
             }
             return response;
         }).then((e) => {
             requestAnimationFrame(() => {
                 if (_record_access === true) {
-                    cache.upsert(cache.FILE_PATH, [currentShare(), path], (response) => {
+                    cache.upsert(cache.FILE_PATH, [currentBackend(), currentShare(), path], (response) => {
                         if (!response || !response.results) return null;
                         if (this.current_path === path) {
                             this.obs && this.obs.next({
                                 status: "ok",
                                 results: response.results,
-                                metadata: response.metadata,
+                                permissions: response.permissions,
                             });
                         }
                         response.last_access = new Date();
@@ -136,11 +132,11 @@ class FileSystem {
         return this._replace(path, "loading")
             .then((res) => this.current_path === dirname(path) ?
                 this._ls_from_cache(dirname(path)) : Promise.resolve(res))
-            .then(() => http_get(url))
+            .then(() => http_post(url))
             .then((res) => {
-                return cache.remove(cache.FILE_CONTENT, [currentShare(), path])
-                    .then(cache.remove(cache.FILE_CONTENT, [currentShare(), path], false))
-                    .then(cache.remove(cache.FILE_PATH, [currentShare(), dirname(path)], false))
+                return cache.remove(cache.FILE_CONTENT, [currentBackend(), currentShare(), path])
+                    .then(cache.remove(cache.FILE_CONTENT, [currentBackend(), currentShare(), path], false))
+                    .then(cache.remove(cache.FILE_PATH, [currentBackend(), currentShare(), dirname(path)], false))
                     .then(this._remove(path, "loading"))
                     .then((res) => this.current_path === dirname(path) ?
                         this._ls_from_cache(dirname(path)) : Promise.resolve(res));
@@ -160,8 +156,9 @@ class FileSystem {
                 if (this.is_binary(res) === true) {
                     return Promise.reject({ code: "BINARY_FILE" });
                 }
-                return cache.upsert(cache.FILE_CONTENT, [currentShare(), path], (response) => {
+                return cache.upsert(cache.FILE_CONTENT, [currentBackend(), currentShare(), path], (response) => {
                     const file = response ? response : {
+                        backend: currentBackend(),
                         share: currentShare(),
                         path: path,
                         last_update: null,
@@ -178,11 +175,23 @@ class FileSystem {
     }
 
     zip(paths) {
-        const url = appendShareToUrl(
-            "/api/files/zip?" + paths.map((p) => "path=" + prepare(p)).join("&"),
-        );
+        let url = appendShareToUrl("/api/files/zip?" + paths.map((p) => "path=" + prepare(p)).join("&"));
+        if (paths.length === 1 && filetype(paths[0]) === "file") {
+            url = appendShareToUrl("/api/files/cat?path=" + prepare(paths[0]) + "&name=" + basename(paths[0]));
+        }
         window.open(url);
         return Promise.resolve();
+    }
+    unzip(paths, signal) {
+        const url = appendShareToUrl(
+            "/api/files/unzip?" + paths.map((p) => "path=" + prepare(p)).join("&"),
+        );
+        return fetch(url, { signal, method: "POST" }).then((r) => {
+            if (r.ok) return r.json();
+            return r.json().then((err) => {
+                throw new Error(err.message);
+            });
+        });
     }
 
     options(path) {
@@ -230,7 +239,7 @@ class FileSystem {
 
         const action_execute = (part_of_a_batch_operation = false) => {
             if (part_of_a_batch_operation === true) {
-                return http_get(url)
+                return http_post(url)
                     .then(() => {
                         return this._replace(destination_path, null, "loading")
                             .then(() => this._refresh(destination_path));
@@ -242,13 +251,14 @@ class FileSystem {
                     });
             }
 
-            return http_get(url)
+            return http_post(url)
                 .then(() => {
                     return this._replace(destination_path, null, "loading")
                         .then(() => origin_path !== destination_path ?
                             this._remove(origin_path, "loading") : Promise.resolve())
-                        .then(() => cache.add(cache.FILE_PATH, [currentShare(), destination_path], {
+                        .then(() => cache.add(cache.FILE_PATH, [currentBackend(), currentShare(), destination_path], {
                             path: destination_path,
+                            backend: currentBackend(),
                             share: currentShare(),
                             results: [],
                             access_count: 0,
@@ -266,13 +276,10 @@ class FileSystem {
                 });
         };
 
-
-        if (step === "prepare_only") {
-            return action_prepare(true);
-        } else if (step === "execute_only") {
-            return action_execute(true);
-        } else {
-            return action_prepare().then(action_execute);
+        switch(step) {
+        case "prepare_only": return action_prepare(true);
+        case "execute_only": return action_execute(true);
+        default: return action_prepare().then(action_execute);
         }
     }
 
@@ -286,8 +293,7 @@ class FileSystem {
                     .then(() => this._refresh(destination_path));
             } else {
                 return this._add(destination_path, "loading")
-                    .then(() => origin_path !== destination_path ?
-                        this._add(origin_path, "loading") : Promise.resolve())
+                    .then(() => origin_path !== destination_path ? this._add(origin_path, "loading") : Promise.resolve())
                     .then(() => this._refresh(origin_path, destination_path));
             }
         };
@@ -327,17 +333,15 @@ class FileSystem {
                     return http_post(url, file, "blob", params);
                 } else {
                     const url = appendShareToUrl("/api/files/touch?path=" + prepare(path));
-                    return http_get(url);
+                    return http_post(url);
                 }
             }
         };
 
-        if (step === "prepare_only") {
-            return action_prepare(true);
-        } else if (step === "execute_only") {
-            return action_execute(true);
-        } else {
-            return action_prepare().then(action_execute);
+        switch(step) {
+        case "prepare_only": return action_prepare(true);
+        case "execute_only": return action_execute(true);
+        default: return action_prepare().then(action_execute);
         }
     }
 
@@ -349,17 +353,17 @@ class FileSystem {
         return this._replace(origin_path, "loading")
             .then(this._add(destination_path, "loading"))
             .then(() => this._refresh(origin_path, destination_path))
-            .then(() => http_get(url))
+            .then(() => http_post(url))
             .then((res) => {
                 return this._remove(origin_path, "loading")
                     .then(() => this._replace(destination_path, null, "loading"))
                     .then(() => this._refresh(origin_path, destination_path))
                     .then(() => {
-                        cache.update(cache.FILE_PATH, [currentShare(), origin_path], (data) => {
+                        cache.update(cache.FILE_PATH, [currentBackend(), currentShare(), origin_path], (data) => {
                             data.path = data.path.replace(origin_path, destination_path);
                             return data;
                         }, false);
-                        cache.update(cache.FILE_CONTENT, [currentShare(), origin_path], (data) => {
+                        cache.update(cache.FILE_CONTENT, [currentBackend(), currentShare(), origin_path], (data) => {
                             data.path = data.path.replace(origin_path, destination_path);
                             return data;
                         }, false);
@@ -391,7 +395,7 @@ class FileSystem {
             if (value.access_count >= 1 && value.path !== "/") {
                 data.push(value);
             }
-        }, cache.FILE_PATH, [currentShare(), "/"]).then(() => {
+        }, cache.FILE_PATH, [currentBackend(), currentShare(), "/"]).then(() => {
             return Promise.resolve(
                 data
                     .sort((a, b) => a.access_count > b.access_count? -1 : 1)
@@ -412,9 +416,10 @@ class FileSystem {
         });
 
         function update_cache(result) {
-            return cache.upsert(cache.FILE_CONTENT, [currentShare(), path], (response) => {
+            return cache.upsert(cache.FILE_CONTENT, [currentBackend(), currentShare(), path], (response) => {
                 if (!response) {
                     response = {
+                        backend: currentBackend(),
                         share: currentShare(),
                         path: path,
                         last_access: null,
@@ -439,7 +444,7 @@ class FileSystem {
     }
 
     _replace(path, icon, icon_previous) {
-        return cache.update(cache.FILE_PATH, [currentShare(), dirname(path)], function(res) {
+        return cache.update(cache.FILE_PATH, [currentBackend(), currentShare(), dirname(path)], function(res) {
             res.results = res.results.map((file) => {
                 if (file.name === basename(path) && file.icon == icon_previous) {
                     if (!icon) {
@@ -455,29 +460,34 @@ class FileSystem {
         });
     }
     _add(path, icon) {
-        return cache.upsert(cache.FILE_PATH, [currentShare(), dirname(path)], (res) => {
+        return cache.upsert(cache.FILE_PATH, [currentBackend(), currentShare(), dirname(path)], (res) => {
+            const file = mutateFile({
+                path: path,
+                name: basename(path),
+                type: filetype(path),
+            }, path);
+            if (icon) file.icon = icon;
+
             if (!res || !res.results) {
                 res = {
-                    path: path,
+                    path: dirname(path),
+                    backend: currentBackend(),
                     share: currentShare(),
                     results: [],
                     access_count: 0,
                     last_access: null,
                     last_update: new Date(),
                 };
+                if (file.type === "directory") {
+                    return res;
+                }
             }
-            const file = mutateFile({
-                path: path,
-                name: basename(path),
-                type: /\/$/.test(path) ? "directory" : "file",
-            }, path);
-            if (icon) file.icon = icon;
             res.results.push(file);
             return res;
         });
     }
     _remove(path, previous_icon) {
-        return cache.update(cache.FILE_PATH, [currentShare(), dirname(path)], function(res) {
+        return cache.update(cache.FILE_PATH, [currentBackend(), currentShare(), dirname(path)], function(res) {
             if (!res) return null;
             res.results = res.results.filter((file) => {
                 return file.name === basename(path) && file.icon == previous_icon ? false : true;

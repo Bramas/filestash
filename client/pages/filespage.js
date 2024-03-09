@@ -1,11 +1,10 @@
 import React, { createRef } from "react";
 import { DragDropContext } from "react-dnd";
 import HTML5Backend from "react-dnd-html5-backend-filedrop";
-import { SelectableGroup } from "react-selectable";
 
 import "./filespage.scss";
 import "./error.scss";
-import { Files } from "../model/";
+import { Files, Tags } from "../model/";
 import {
     sort, onCreate, onRename, onMultiRename, onDelete, onMultiDelete,
     onMultiDownload, onUpload, onSearch,
@@ -42,15 +41,16 @@ export class FilesPageComponent extends React.Component {
             is_search: false,
             files: [],
             selected: [],
-            metadata: null,
+            permissions: null,
             frequents: null,
+            tags: null,
             page_number: PAGE_NUMBER_INIT,
             loading: true,
         };
         this.$scroll = createRef();
 
         this.observers = [];
-        this.toggleHiddenFilesVisibilityonCtrlK = this.toggleHiddenFilesVisibilityonCtrlK.bind(this);
+        this.shortcut = this.shortcut.bind(this);
     }
 
     componentDidMount() {
@@ -59,7 +59,7 @@ export class FilesPageComponent extends React.Component {
         // subscriptions
         this.props.subscribe("file.create", function() {
             return onCreate.apply(this, arguments).then(() => {
-                if (this.state.metadata && this.state.metadata.refresh_on_create === true) {
+                if (this.state.permissions && this.state.permissions.refresh_on_create === true) {
                     this.onRefresh(this.state.path, "directory");
                 }
                 return Promise.resolve();
@@ -73,7 +73,7 @@ export class FilesPageComponent extends React.Component {
         this.props.subscribe("file.download.multiple", onMultiDownload.bind(this));
         this.props.subscribe("file.refresh", this.onRefresh.bind(this));
         this.props.subscribe("file.select", this.toggleSelect.bind(this));
-        window.addEventListener("keydown", this.toggleHiddenFilesVisibilityonCtrlK);
+        window.addEventListener("keydown", this.shortcut);
     }
 
     componentWillUnmount() {
@@ -84,7 +84,7 @@ export class FilesPageComponent extends React.Component {
         this.props.unsubscribe("file.delete.multiple");
         this.props.unsubscribe("file.refresh");
         this.props.unsubscribe("file.select");
-        window.removeEventListener("keydown", this.toggleHiddenFilesVisibilityonCtrlK);
+        window.removeEventListener("keydown", this.shortcut);
         this._cleanupListeners();
 
         LAST_PAGE_PARAMS.path = this.state.path;
@@ -108,8 +108,8 @@ export class FilesPageComponent extends React.Component {
         }
     }
 
-    toggleHiddenFilesVisibilityonCtrlK(e) {
-        if (e.keyCode === 72 && e.ctrlKey === true) {
+    shortcut(e) {
+        if (e.code === "KeyH" && e.ctrlKey === true) {
             e.preventDefault();
             this.setState({ show_hidden: !this.state.show_hidden }, () => {
                 settings_put("filespage_show_hidden", this.state.show_hidden);
@@ -120,6 +120,13 @@ export class FilesPageComponent extends React.Component {
                 }
             });
             this.onRefresh();
+        } else if (e.code === "KeyA" && e.ctrlKey === true && document.activeElement.tagName !== "INPUT") {
+            if (this.state.selected.length === this.state.files.length) {
+                this.handleMultiSelect([], e);
+            } else {
+                this.handleMultiSelect(this.state.files, e);
+            }
+            requestAnimationFrame(() => document.getSelection().removeAllRanges());
         }
     }
 
@@ -127,11 +134,10 @@ export class FilesPageComponent extends React.Component {
         this._cleanupListeners();
         const observer = Files.ls(path, this.state.show_hidden).subscribe((res) => {
             if (res.status !== "ok") {
-                notify.send(res, "error");
                 return;
             }
             this.setState({
-                metadata: res.metadata,
+                permissions: res.permissions,
                 files: sort(res.results, this.state.sort),
                 selected: [],
                 loading: false,
@@ -150,7 +156,10 @@ export class FilesPageComponent extends React.Component {
         }, (error) => this.props.error(error));
         this.observers.push(observer);
         if (path === "/") {
-            Files.frequents().then((s) => this.setState({ frequents: s }));
+            Promise.all([Files.frequents(), Tags.all()])
+                .then(([s, t]) => {
+                    this.setState({ frequents: s, tags: t });
+                });
         }
     }
 
@@ -216,7 +225,7 @@ export class FilesPageComponent extends React.Component {
             this.setState({
                 files: sort(f, this.state.sort),
                 loading: false,
-                metadata: {
+                permissions: {
                     can_rename: false,
                     can_delete: false,
                     can_share: false,
@@ -225,7 +234,7 @@ export class FilesPageComponent extends React.Component {
         }, (err) => {
             this.setState({
                 loading: false,
-                metadata: {
+                permissions: {
                     can_rename: false,
                     can_delete: false,
                     can_share: false,
@@ -243,8 +252,16 @@ export class FilesPageComponent extends React.Component {
     }
 
     handleMultiSelect(selectedFiles, e) {
-        this.setState({ selected: selectedFiles.map((f) => f.path) });
+        if (!e.target) {
+            this.setState({ selected: selectedFiles.map((f) => f.path) });
+            return;
+        } else if (e.target.classList.contains("component_thing")) {
+            return;
+        }
+        this.handleMultiSelect(selectedFiles, {target: e.target.parentElement});
+        return;
     }
+
     toggleSelect(path) {
         const idx = this.state.selected.indexOf(path);
         if (idx == -1) {
@@ -266,58 +283,50 @@ export class FilesPageComponent extends React.Component {
         }
         return (
             <div className="component_page_filespage">
-              <BreadCrumb className="breadcrumb" path={this.state.path} currentSelection={this.state.selected} fileCount={this.state.files.length} />
-              <SelectableGroup onSelection={this.handleMultiSelect.bind(this)} tolerance={2} onNonItemClick={this.handleMultiSelect.bind(this, [])} preventDefault={true} enabled={this.state.is_search === false} className="selectablegroup">
-                <div className="page_container">
-                  <div ref={this.$scroll} className="scroll-y">
-                    <InfiniteScroll 
-                        pageStart={0} 
-                        loader={$moreLoading} 
-                        hasMore={this.state.files.length > 70}
-                        initialLoad={false} 
-                        useWindow={false} 
-                        loadMore={this.loadMore.bind(this)} 
-                        threshold={100}>
-                        {/* <Sidebar path={this.state.path}/> */}
-                        <NgShow 
-                            className="container" 
-                            cond={!!this.state.is_search || !this.state.loading}>
-                            <NgIf cond={this.state.path === "/" && window.self === window.top}>
-                            <FrequentlyAccess files={this.state.frequents} />
+                <BreadCrumb className="breadcrumb" path={this.state.path} currentSelection={this.state.selected} fileCount={this.state.files.length}/>
+                <div onClick={(e) => this.handleMultiSelect([], e)} className="selectablegroup">
+                    <div className="page_container">
+                        <div ref={this.$scroll} className="scroll-y">
+                            <InfiniteScroll
+                                pageStart={0} loader={$moreLoading}
+                                hasMore={this.state.files.length > 70}
+                                initialLoad={false} useWindow={false}
+                                loadMore={this.loadMore.bind(this)} threshold={100}>
+                                {/* <Sidebar path={this.state.path}/> */}
+                                <NgShow
+                                    className="container"
+                                    cond={!!this.state.is_search || !this.state.loading}>
+                                    <NgIf cond={this.state.path === "/" && window.self === window.top}>
+                                        <FrequentlyAccess tags={this.state.tags} files={this.state.frequents} />
+                                    </NgIf>
+                                    <Submenu
+                                        path={this.state.path}
+                                        sort={this.state.sort}
+                                        view={this.state.view}
+                                        onSearch={this.onSearch.bind(this)}
+                                        onViewUpdate={(value) => this.onView(value)}
+                                        onSortUpdate={(value) => this.onSort(value)}
+                                        accessRight={this.state.permissions || {}}
+                                        selected={this.state.selected} />
+                                    <NgIf cond={!this.state.loading}>
+                                        <FileSystem
+                                            path={this.state.path} sort={this.state.sort}
+                                            view={this.state.view} selected={this.state.selected}
+                                            files={this.state.files.slice(0, this.state.page_number * LOAD_PER_SCROLL)}
+                                            isSearch={this.state.is_search}
+                                            metadata={this.state.permissions || {}}
+                                            onSort={this.onSort.bind(this)}
+                                            onView={this.onView.bind(this)} />
+                                    </NgIf>
+                                </NgShow>
+                            </InfiniteScroll>
+                            <NgIf cond={this.state.loading === true}>
+                                <Loader/>
                             </NgIf>
-                            <Submenu 
-                                path={this.state.path} 
-                                sort={this.state.sort} 
-                                view={this.state.view} 
-                                onSearch={this.onSearch.bind(this)} 
-                                onViewUpdate={(value) => this.onView(value)} 
-                                onSortUpdate={(value) => this.onSort(value)} 
-                                accessRight={this.state.metadata || {}} 
-                                selected={this.state.selected} />
-                            <NgIf cond={!this.state.loading}>
-                                <FileSystem 
-                                    path={this.state.path} 
-                                    sort={this.state.sort} 
-                                    view={this.state.view} 
-                                    selected={this.state.selected}
-                                    files={this.state.files.slice(0, this.state.page_number * LOAD_PER_SCROLL)} 
-                                    isSearch={this.state.is_search}
-                                    metadata={this.state.metadata || {}} 
-                                    onSort={this.onSort.bind(this)} 
-                                    onView={this.onView.bind(this)} />
-                            </NgIf>
-                        </NgShow>
-                    </InfiniteScroll>
-                    <NgIf cond={this.state.loading === true}>
-                      <Loader/>
-                    </NgIf>
-                    <MobileFileUpload path={this.state.path} accessRight={this.state.metadata || {}} />
-                  </div>
+                            <MobileFileUpload path={this.state.path} accessRight={this.state.permissions || {}} />
+                        </div>
+                    </div>
                 </div>
-                <div className="upload-footer">
-                  <div className="bar"></div>
-                </div>
-              </SelectableGroup>
             </div>
         );
     }

@@ -1,14 +1,16 @@
 package plg_backend_sftp
 
 import (
-	. "github.com/mickael-kerjean/filestash/server/common"
-	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"net"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+
+	. "github.com/mickael-kerjean/filestash/server/common"
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 var SftpCache AppCache
@@ -16,6 +18,7 @@ var SftpCache AppCache
 type Sftp struct {
 	SSHClient  *ssh.Client
 	SFTPClient *sftp.Client
+	wg         *sync.WaitGroup
 }
 
 func init() {
@@ -24,6 +27,16 @@ func init() {
 	SftpCache = NewAppCache()
 	SftpCache.OnEvict(func(key string, value interface{}) {
 		c := value.(*Sftp)
+		if c == nil {
+			Log.Warning("plg_backend_sftp::sftp is nil on close")
+			return
+		} else if c.wg == nil {
+			c.Close()
+			Log.Warning("plg_backend_sftp::wg is nil on close")
+			return
+		}
+		c.wg.Wait()
+		Log.Debug("plg_backend_sftp::vacuum")
 		c.Close()
 	})
 }
@@ -49,16 +62,26 @@ func (s Sftp) Init(params map[string]string, app *App) (IBackend, error) {
 	c := SftpCache.Get(params)
 	if c != nil {
 		d := c.(*Sftp)
+		if d == nil {
+			Log.Warning("plg_backend_sftp::sftp is nil on get")
+			return nil, ErrInternal
+		} else if d.wg == nil {
+			Log.Warning("plg_backend_sftp::wg is nil on get")
+			return nil, ErrInternal
+		}
+		d.wg.Add(1)
+		go func() {
+			<-app.Context.Done()
+			d.wg.Done()
+		}()
 		return d, nil
 	}
 
 	addr := p.hostname + ":" + p.port
-	var auth []ssh.AuthMethod
 
 	keyStartMatcher := regexp.MustCompile(`^-----BEGIN [A-Z\ ]+-----`)
 	keyEndMatcher := regexp.MustCompile(`-----END [A-Z\ ]+-----$`)
 	keyContentMatcher := regexp.MustCompile(`^[a-zA-Z0-9\+\/\=\n]+$`)
-
 	isPrivateKey := func(pass string) bool {
 		p := strings.TrimSpace(pass)
 
@@ -93,6 +116,15 @@ func (s Sftp) Init(params map[string]string, app *App) (IBackend, error) {
 		return keyStartString + "\n" + keyContentString + "\n" + keyEndString
 	}
 
+	/*
+	 * SSH has a range of authentication methods available: publickey, password,
+	 * keyboard-interactive, password-callback, publickey-callback, gss, .... Typical sftp
+	 * servers only have those 2: 'publickey' and 'password' but some exotic ones we've seen
+	 * have 'publickey' and 'keyboard-interactive'. If you're unlucky enough to have to work
+	 * with something else than those 3 we provide support for, either create a PR here
+	 * or contact us
+	 */
+	var auth []ssh.AuthMethod
 	if isPrivateKey(p.password) {
 		privateKey := restorePrivateKeyLineBreaks(p.password)
 		signer, err := func() (ssh.Signer, error) {
@@ -106,7 +138,16 @@ func (s Sftp) Init(params map[string]string, app *App) (IBackend, error) {
 		}
 		auth = []ssh.AuthMethod{ssh.PublicKeys(signer)}
 	} else {
-		auth = []ssh.AuthMethod{ssh.Password(p.password)}
+		auth = []ssh.AuthMethod{
+			ssh.Password(p.password),
+			ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
+				answers := make([]string, len(questions))
+				for i, _ := range answers {
+					answers[i] = p.password
+				}
+				return answers, nil
+			}),
+		}
 	}
 
 	config := &ssh.ClientConfig{
@@ -116,11 +157,16 @@ func (s Sftp) Init(params map[string]string, app *App) (IBackend, error) {
 			if params["hostkey"] == "" {
 				return nil
 			}
-			hostKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(params["hostkey"]))
-			if err != nil {
-				return err
+			fsha := ssh.FingerprintSHA256(key)
+			if fsha == params["hostkey"] {
+				return nil
 			}
-			return ssh.FixedHostKey(hostKey)(hostname, remote, key)
+			fmd := ssh.FingerprintLegacyMD5(key)
+			if fmd == params["hostkey"] {
+				return nil
+			}
+			Log.Debug("plg_backend_sftp::fingerprint host key isn't correct on %s => '%s'", hostname, fsha)
+			return ErrNotValid
 		},
 	}
 
@@ -139,6 +185,12 @@ func (s Sftp) Init(params map[string]string, app *App) (IBackend, error) {
 		return &s, err
 	}
 	s.SFTPClient = session
+	s.wg = new(sync.WaitGroup)
+	s.wg.Add(1)
+	go func() {
+		<-app.Context.Done()
+		s.wg.Done()
+	}()
 	SftpCache.Set(params, &s)
 	return &s, nil
 }

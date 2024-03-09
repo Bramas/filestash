@@ -5,7 +5,7 @@ import { Session } from "../model/";
 import { Loader, ErrorPage } from "../components/";
 import { t } from "../locales/";
 
-export function HomePageComponent({ error }) {
+function HomePageComponent({ error }) {
     const [redirection, setRedirection] = useState(null);
 
     useEffect(() => {
@@ -26,6 +26,10 @@ export function HomePageComponent({ error }) {
 
     if (!redirection) {
         return ( <div> <Loader /> </div> );
+    }
+    if (redirection === "/login") {
+        location.href = redirection;
+        return (<div></div>);
     }
     return ( <Redirect to={redirection} /> );
 }

@@ -2,24 +2,25 @@ package plg_video_transcoder
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/gorilla/mux"
-	. "github.com/mickael-kerjean/filestash/server/common"
-	. "github.com/mickael-kerjean/filestash/server/middleware"
 	"io"
 	"math"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gorilla/mux"
+	. "github.com/mickael-kerjean/filestash/server/common"
+	. "github.com/mickael-kerjean/filestash/server/middleware"
 )
 
 const (
-	HLS_SEGMENT_LENGTH = 10
+	HLS_SEGMENT_LENGTH = 30
 	CLEAR_CACHE_AFTER  = 12
 	VideoCachePath     = "data/cache/video/"
 )
@@ -78,7 +79,7 @@ func init() {
 		return
 	}
 
-	cachePath := filepath.Join(GetCurrentDir(), VideoCachePath)
+	cachePath := GetAbsolutePath(VideoCachePath)
 	os.RemoveAll(cachePath)
 	os.MkdirAll(cachePath, os.ModePerm)
 
@@ -124,8 +125,7 @@ func hls_playlist(reader io.ReadCloser, ctx *App, res *http.ResponseWriter, req 
 	}
 
 	cacheName := "vid_" + GenerateID(ctx) + "_" + QuickHash(path, 10) + ".dat"
-	cachePath := filepath.Join(
-		GetCurrentDir(),
+	cachePath := GetAbsolutePath(
 		VideoCachePath,
 		cacheName,
 	)
@@ -164,7 +164,7 @@ func hls_playlist(reader io.ReadCloser, ctx *App, res *http.ResponseWriter, req 
 	return NewReadCloserFromBytes([]byte(response)), nil
 }
 
-func hls_transcode(ctx App, res http.ResponseWriter, req *http.Request) {
+func hls_transcode(ctx *App, res http.ResponseWriter, req *http.Request) {
 	segmentNumber, err := strconv.Atoi(mux.Vars(req)["segment"])
 	if err != nil {
 		Log.Info("[plugin hls] invalid segment request '%s'", mux.Vars(req)["segment"])
@@ -172,8 +172,7 @@ func hls_transcode(ctx App, res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	startTime := segmentNumber * HLS_SEGMENT_LENGTH
-	cachePath := filepath.Join(
-		GetCurrentDir(),
+	cachePath := GetAbsolutePath(
 		VideoCachePath,
 		req.URL.Query().Get("path"),
 	)
@@ -183,7 +182,7 @@ func hls_transcode(ctx App, res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("ffmpeg", []string{
+	cmd := exec.CommandContext(req.Context(), "ffmpeg", []string{
 		"-timelimit", "30",
 		"-ss", fmt.Sprintf("%d.00", startTime),
 		"-i", cachePath,
@@ -192,8 +191,18 @@ func hls_transcode(ctx App, res http.ResponseWriter, req *http.Request) {
 		"-vcodec", "libx264",
 		"-preset", "veryfast",
 		"-acodec", "aac",
+		"-ab", "128k",
+		"-ac", "2",
 		"-pix_fmt", "yuv420p",
-		"-x264opts:0", "subme=0:me_range=4:rc_lookahead=10:me=dia:no_chroma_me:8x8dct=0:partitions=none",
+		"-x264opts", strings.Join([]string{
+			"subme=0",
+			"me_range=4",
+			"rc_lookahead=10",
+			"me=dia",
+			"no_chroma_me",
+			"8x8dct=0",
+			"partitions=none",
+		}, ":"),
 		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d.000)", HLS_SEGMENT_LENGTH),
 		"-f", "ssegment",
 		"-segment_time", fmt.Sprintf("%d.00", HLS_SEGMENT_LENGTH),
@@ -203,10 +212,13 @@ func hls_transcode(ctx App, res http.ResponseWriter, req *http.Request) {
 		"pipe:out%03d.ts",
 	}...)
 
-	var str bytes.Buffer
+	var buffer bytes.Buffer
 	cmd.Stdout = res
-	cmd.Stderr = &str
-	_ = cmd.Run()
+	cmd.Stderr = &buffer
+	err = cmd.Run()
+	if err != nil {
+		Log.Error("plg_video_transcoder::ffmpeg::run '%s' - %s", err.Error(), base64.StdEncoding.EncodeToString(buffer.Bytes()))
+	}
 }
 
 type FFProbeData struct {

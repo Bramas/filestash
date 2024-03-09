@@ -16,9 +16,14 @@ import (
 	mathrand "math/rand"
 	"os"
 	"runtime"
+	"sort"
+	"sync"
 )
 
-var Letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+var (
+	Letters                 = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	GCMNonce NonceGenerator = NewNonceGenerator(12)
+)
 
 func EncryptString(secret string, data string) (string, error) {
 	d, err := compress([]byte(data))
@@ -126,17 +131,16 @@ func encrypt(key []byte, plaintext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	gcm, err := cipher.NewGCM(c)
 	if err != nil {
 		return nil, err
 	}
 
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
+	nonce := GCMNonce.Next()
+	if gcm.NonceSize() != len(nonce) {
+		Log.Error("common::crypto nonce size isn't '12' but '%d'", gcm.NonceSize())
+		return nil, ErrNotValid
 	}
-
 	return gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
 
@@ -189,42 +193,28 @@ func verify(something []byte) ([]byte, error) {
 // Create a unique ID that can be use to identify different session
 func GenerateID(ctx *App) string {
 	p := ""
-	params := ctx.Session
-	if params["type"] != "" {
-		p += "type =>" + params["type"]
-	}
-	if params["host"] != "" {
-		p += "host =>" + params["host"]
-	}
-	if params["hostname"] != "" {
-		p += "hostname =>" + params["hostname"]
-	}
-	if params["username"] != "" {
-		p += "username =>" + params["username"]
-	}
-	if params["user"] != "" {
-		p += "user =>" + params["user"]
-	}
-	if params["repo"] != "" {
-		p += "repo =>" + params["repo"]
-	}
-	if params["access_key_id"] != "" {
-		p += "access_key_id =>" + params["access_key_id"]
-	}
-	if params["endpoint"] != "" {
-		p += "endpoint =>" + params["endpoint"]
-	}
-	if params["bearer"] != "" {
-		p += "bearer =>" + params["bearer"]
-	}
-	if params["token"] != "" {
-		p += "token =>" + params["token"]
-	}
 
-	if p == "" {
-		return Hash("N/A", 20)
+	orderedKeys := make([]string, len(ctx.Session))
+	for key, _ := range ctx.Session {
+		orderedKeys = append(orderedKeys, key)
 	}
-	p += "salt => " + SECRET_KEY
+	sort.Strings(orderedKeys)
+
+	for _, key := range orderedKeys {
+		switch key {
+		case "timestamp":
+		case "password":
+		case "path":
+		default:
+			if val := ctx.Session[key]; val != "" {
+				p += key + "=>" + ctx.Session[key] + ", "
+			}
+		}
+	}
+	if p == "" {
+		return "na"
+	}
+	p += "salt=>" + SECRET_KEY
 	return Hash(p, 20)
 }
 
@@ -246,4 +236,32 @@ func GenerateMachineID() string {
 		}
 	}
 	return "na"
+}
+
+type NonceGenerator struct {
+	current []byte
+	count   int
+	*sync.Mutex
+}
+
+func NewNonceGenerator(size int) NonceGenerator {
+	firstNonce := make([]byte, size)
+	io.ReadFull(rand.Reader, firstNonce)
+	var m sync.Mutex
+	return NonceGenerator{firstNonce, size, &m}
+}
+
+func (this *NonceGenerator) Next() []byte {
+	this.Lock()
+	newNonce := make([]byte, this.count)
+	for i := len(this.current) - 1; i >= 0; i-- {
+		if this.current[i] < 255 {
+			this.current[i] += 1
+			break
+		}
+		this.current[i] = 0
+	}
+	newNonce = this.current
+	this.Unlock()
+	return newNonce
 }

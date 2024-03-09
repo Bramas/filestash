@@ -1,6 +1,7 @@
 import React from "react";
 import PropTypes from "prop-types";
 import { Link } from "react-router-dom";
+import { URL_FILES } from "../helpers/";
 import { NgIf, Icon, EventEmitter } from "./";
 import ReactCSSTransitionGroup from "react-addons-css-transition-group";
 import { t } from '../locales/';
@@ -69,6 +70,8 @@ export class BreadCrumb extends React.Component {
                             this.state.path.map((path, index) => {
                                 return (
                                     <Path key={"breadcrumb_"+index}
+                                        className={"n" + index}
+                                        baseURL={index === 0 ? URL_FILES : this.props.baseURL || URL_FILES}
                                         currentSelection={this.props.currentSelection} path={path}
                                         isLast={this.state.path.length === index + 1}
                                         needSaving={this.props.needSaving} />
@@ -161,7 +164,7 @@ class PathElementWrapperComponent extends React.Component {
             className += " highlight";
         }
 
-        let href = "/files" + (this.props.path.full || "");
+        let href = this.props.baseURL + (this.props.path.full || "");
         href = href
             .replace(/\%/g, "%2525") // Hack to get the Link Component to work
             // See ExistingThing in 'thing-existing.js'
@@ -187,7 +190,7 @@ class PathElementWrapperComponent extends React.Component {
                     <Separator/>
                 </NgIf>
                 <NgIf cond={this.props.isLast === true} className="label">
-                    {this.limitSize(this.props.path.label)}
+                    <div>{this.limitSize(this.props.path.label)}</div>
                     <Saving needSaving={this.props.needSaving} />
                 </NgIf>
             </div>
@@ -206,9 +209,9 @@ export class PathElement extends PathElementWrapper {
 
     render(highlight = false) {
         let className = "component_path-element";
-        if (this.props.isLast) {
-            className += " is-last";
-        }
+        if (this.props.isFirst) className += ` is-first`;
+        if (this.props.className) className += ` ${this.props.className}`;
+
         return (
             <div className={className}>
                 <PathElementWrapper highlight={highlight} {...this.props} />

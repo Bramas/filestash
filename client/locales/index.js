@@ -18,3 +18,5 @@ function reformat(translated, initial) {
     }
     return (translated[0] && translated[0].toUpperCase() + translated.substring(1)) || "";
 }
+
+export default t;

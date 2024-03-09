@@ -11,7 +11,7 @@ const config = {
         app: path.join(__dirname, "client", "index.js"),
     },
     output: {
-        path: path.join(__dirname, "dist", "data", "public"),
+        path: path.join(__dirname, "server", "ctrl", "static", "www"),
         publicPath: "/",
         filename: "assets/js/[name]_[chunkhash].js",
         chunkFilename: "assets/js/chunk_[name]_[id]_[chunkhash].js",
@@ -25,19 +25,26 @@ const config = {
             },
             {
                 test: /\.html$/,
-                loader: "html-loader",
+                use: "html-loader",
             },
             {
                 test: /\.woff2$/,
-                loader: "woff-loader",
+                use: "woff-loader",
             },
             {
                 test: /\.scss$/,
-                loaders: ["style-loader", "css-loader", "sass-loader"],
+                use: [
+                    { loader: "style-loader" },
+                    { loader: "css-loader" },
+                    { loader: "sass-loader" },
+                ],
             },
             {
                 test: /\.css$/,
-                loaders: ["style-loader", "css-loader"],
+                use: [
+                    { loader: "style-loader" },
+                    { loader: "css-loader" },
+                ],
             },
             {
                 test: /\.(pdf|jpg|png|gif|svg|ico|woff|woff2|eot|ttf)$/,
@@ -54,7 +61,6 @@ const config = {
         new webpack.DefinePlugin({
             "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
         }),
-        new webpack.optimize.OccurrenceOrderPlugin(),
         new HtmlWebpackPlugin({
             template: path.join(__dirname, "client", "index.html"),
             inject: true,
@@ -67,17 +73,27 @@ const config = {
         }),
         new CopyWebpackPlugin([
             { from: "locales/*.json", to: "assets/" },
-            { from: "manifest.json", to: "assets/" },
             { from: "worker/*.js", to: "assets/" },
             { from: "assets/logo/*" },
+            { from: "assets/img/*" },
             { from: "assets/icons/*" },
             { from: "assets/fonts/*" },
         ], { context: path.join(__dirname, "client") }),
         new CopyWebpackPlugin([
-            { from: "node_modules/pdfjs-dist/", to: "assets/vendor/pdfjs/2.6.347/" },
+            { from: "node_modules/pdfjs-dist/build/*.js", to: "assets/vendor/" },
+            { from: "node_modules/pdfjs-dist/cmaps/*", to: "assets/vendor/" },
         ]),
         // new BundleAnalyzerPlugin()
     ],
+    resolve: {
+        fallback: {
+            "path": require.resolve("path-browserify"),
+            "crypto": require.resolve("crypto-browserify"),
+            "buffer": require.resolve("buffer/"),
+            "stream": require.resolve("stream-browserify"),
+        },
+    },
+    mode: process.env.NODE_ENV || "production",
 };
 
 
@@ -101,7 +117,7 @@ if (process.env.NODE_ENV === "production") {
         minRatio: 0.8,
     }));
 } else {
-    config.devtool = "#inline-source-map";
+    config.devtool = "inline-source-map";
 }
 
 module.exports = config;

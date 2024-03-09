@@ -1,19 +1,23 @@
-"use strict";
+import { setup_cache_state } from ".";
+import { currentBackend, currentShare } from "./cache_state.js";
 
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const FILE_PATH = "file_path";
 const FILE_CONTENT = "file_content";
+const FILE_TAG = "file_tag";
 
 function DataFromIndexedDB() {
     this.db = null;
     this.FILE_PATH = FILE_PATH;
     this.FILE_CONTENT = FILE_CONTENT;
+    this.FILE_TAG = FILE_TAG;
     return this._init();
 }
 function DataFromMemory() {
     this.data = {};
     this.FILE_PATH = FILE_PATH;
     this.FILE_CONTENT = FILE_CONTENT;
+    this.FILE_TAG = FILE_TAG;
     return this._init();
 }
 
@@ -32,13 +36,21 @@ DataFromIndexedDB.prototype._init = function() {
             // we've change the primary key to be a (path,share)
             db.deleteObjectStore(FILE_PATH);
             db.deleteObjectStore(FILE_CONTENT);
+        } else if (event.oldVersion == 3) {
+            // we've added a FILE_TAG to store tag related data and update
+            // keyPath to have "backend"
+            db.deleteObjectStore(FILE_PATH);
+            db.deleteObjectStore(FILE_CONTENT);
         }
 
-        store = db.createObjectStore(FILE_PATH, { keyPath: ["share", "path"] });
-        store.createIndex("idx_path", ["share", "path"], { unique: true });
+        store = db.createObjectStore(FILE_PATH, { keyPath: ["backend", "share", "path"] });
+        store.createIndex("idx_path", ["backend", "share", "path"], { unique: true });
 
-        store = db.createObjectStore(FILE_CONTENT, { keyPath: ["share", "path"] });
-        store.createIndex("idx_path", ["share", "path"], { unique: true });
+        store = db.createObjectStore(FILE_CONTENT, { keyPath: ["backend", "share", "path"] });
+        store.createIndex("idx_path", ["backend", "share", "path"], { unique: true });
+
+        store = db.createObjectStore(FILE_TAG, { keyPath: ["backend", "share"] });
+        store.createIndex("idx_path", ["backend", "share"], { unique: true });
     };
 
     this.db = new Promise((done, err) => {
@@ -56,7 +68,7 @@ DataFromMemory.prototype._init = function() {
  * Fetch a record using its path, can be either a file path or content
  */
 DataFromIndexedDB.prototype.get = function(type, key) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     return this.db.then((db) => {
         const tx = db.transaction(type, "readonly");
@@ -71,7 +83,7 @@ DataFromIndexedDB.prototype.get = function(type, key) {
     });
 };
 DataFromMemory.prototype.get = function(type, key) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     const data = this.data[type] || null;
     if (data === null) {
@@ -87,7 +99,7 @@ DataFromMemory.prototype.get = function(type, key) {
 };
 
 DataFromIndexedDB.prototype.update = function(type, key, fn, exact = true) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     return this.db.then((db) => {
         const tx = db.transaction(type, "readwrite");
@@ -113,7 +125,7 @@ DataFromIndexedDB.prototype.update = function(type, key, fn, exact = true) {
 };
 
 DataFromMemory.prototype.update = function(type, key, fn, exact = true) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     const data = this.data[type];
     if (data === undefined) {
@@ -134,7 +146,7 @@ DataFromMemory.prototype.update = function(type, key, fn, exact = true) {
 };
 
 DataFromIndexedDB.prototype.upsert = function(type, key, fn) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     return this.db.then((db) => {
         const tx = db.transaction(type, "readwrite");
@@ -154,7 +166,7 @@ DataFromIndexedDB.prototype.upsert = function(type, key, fn) {
     });
 };
 DataFromMemory.prototype.upsert = function(type, key, fn) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     const db = this.data[type] || null;
     if (db === null) {
@@ -167,7 +179,7 @@ DataFromMemory.prototype.upsert = function(type, key, fn) {
 };
 
 DataFromIndexedDB.prototype.add = function(type, key, data) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     return this.db.then((db) => {
         return new Promise((done, error) => {
@@ -180,7 +192,7 @@ DataFromIndexedDB.prototype.add = function(type, key, data) {
     }).catch(() => Promise.resolve());
 };
 DataFromMemory.prototype.add = function(type, key, data) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     if (this.data[type] === undefined) {
         this.data[type] = {};
@@ -190,7 +202,7 @@ DataFromMemory.prototype.add = function(type, key, data) {
 };
 
 DataFromIndexedDB.prototype.remove = function(type, key, exact = true) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     return this.db.then((db) => {
         const tx = db.transaction(type, "readwrite");
@@ -204,8 +216,8 @@ DataFromIndexedDB.prototype.remove = function(type, key, exact = true) {
             });
         } else {
             const request = store.openCursor(IDBKeyRange.bound(
-                [key[0], key[1]],
-                [key[0], key[1]+"\uFFFF"],
+                [key[0], key[1], key[2]],
+                [key[0], key[1], key[2]+"\uFFFF"],
                 true, true,
             ));
             return new Promise((done, err) => {
@@ -223,7 +235,7 @@ DataFromIndexedDB.prototype.remove = function(type, key, exact = true) {
     }).catch(() => Promise.resolve());
 };
 DataFromMemory.prototype.remove = function(type, key, exact = true) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     const data = this.data[type] || null;
     if (data === null) {
@@ -242,15 +254,15 @@ DataFromMemory.prototype.remove = function(type, key, exact = true) {
 };
 
 DataFromIndexedDB.prototype.fetchAll = function(fn, type = FILE_PATH, key) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     return this.db.then((db) => {
         const tx = db.transaction([type], "readonly");
         const store = tx.objectStore(type);
         const index = store.index("idx_path");
         const request = index.openCursor(IDBKeyRange.bound(
-            [key[0], key[1]],
-            [key[0], key[1]+("z".repeat(5000))],
+            [key[0], key[1], key[2]],
+            [key[0], key[1], key[2]+("z".repeat(5000))],
         ));
 
         return new Promise((done, error) => {
@@ -272,7 +284,7 @@ DataFromIndexedDB.prototype.fetchAll = function(fn, type = FILE_PATH, key) {
     }).catch(() => Promise.resolve());
 };
 DataFromMemory.prototype.fetchAll = function(fn, type = FILE_PATH, key) {
-    if (type !== FILE_PATH && type !== FILE_CONTENT) return Promise.reject();
+    if (type !== FILE_PATH && type !== FILE_CONTENT && type !== FILE_TAG) return Promise.reject();
 
     const data = this.data[type] || null;
     if (data === null) {
@@ -295,6 +307,9 @@ DataFromIndexedDB.prototype.destroy = function() {
         this.db.then((db) => {
             purgeAll(db, FILE_PATH);
             purgeAll(db, FILE_CONTENT);
+            // We keep FILE_TAG as this was user generated and potentially frustrating
+            // for users if they were to lose this
+            setup_cache_state("");
         });
         done();
 
@@ -311,11 +326,44 @@ DataFromMemory.prototype.destroy = function() {
     return Promise.resolve();
 };
 
-export let cache = new DataFromMemory();
-if ("indexedDB" in window && window.indexedDB !== null) {
-    const request = indexedDB.open("_indexedDB", 1);
-    request.onsuccess = (e) => {
+export let cache = null;
+
+export function setup_cache() {
+    cache = new DataFromMemory();
+    if ("indexedDB" in window && window.indexedDB !== null) {
         cache = new DataFromIndexedDB();
-        indexedDB.deleteDatabase("_indexedDB");
-    };
+        return Promise.all([cache.db, setup_cache_state()])
+            .then(() => {
+                const currentPath = decodeURIComponent(location.pathname.replace(/^\/.*?\//, "/"));
+                return cache.get(
+                    FILE_PATH,
+                    [currentBackend(), currentShare(), currentPath],
+                ).then((response) => {
+                    if (!response || !response.results) return;
+                    for (let i=0; i<response.results.length; i++) {
+                        if (response.results[i].icon !== "loading") continue
+                        // when we see a dirty cache sync issue, we flush the entire thing as nicely recover
+                        // from such issue would be a dirty hack. A known case for this is when a user
+                        // force quit the browser during an upload, in that scenario, it's much simpler to
+                        // assume our cache is unreliable and start fresh
+                        return Promise.all([
+                            cache.remove(FILE_PATH, [currentBackend(), currentShare(), "/"], false),
+                            cache.remove(FILE_CONTENT, [currentBackend(), currentShare(), "/"], false),
+                        ]);
+                    }
+                    return
+                });
+            })
+            .catch((err) => {
+                if (err === "INDEXEDDB_NOT_SUPPORTED") {
+                    // Firefox in private mode act like if it supports indexedDB but
+                    // is throwing that string as an error if you try to use it ...
+                    // so we fallback with our basic ram cache
+                    cache = new DataFromMemory();
+                    return setup_cache_state();
+                }
+                throw err;
+            })
+    }
+    return setup_cache_state();
 }

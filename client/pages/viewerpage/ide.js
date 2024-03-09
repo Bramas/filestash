@@ -60,7 +60,7 @@ class IDEComponent extends React.Component {
                 [this.state.contentToSave],
                 { type: "text/plain" },
             ),
-        ).then(() => this.props.needSavingUpdate(false));
+        );
     }
 
     onUpdate(property, refresh, value) {
@@ -97,11 +97,11 @@ class IDEComponent extends React.Component {
     download() {
         document.cookie = "download=yes; path=/; max-age=120;";
         this.setState({
-            random: Math.random(),
+            refresh: Date.now(),
             id: window.setInterval(() => {
                 if (/download=yes/.test(document.cookie) === false) {
                     window.clearInterval(this.state.id);
-                    this.setState({ random: Math.random() });
+                    this.setState({ refresh: Date.now() });
                 }
             }, 100),
         });
@@ -176,7 +176,7 @@ class IDEComponent extends React.Component {
                     transitionName="fab" transitionLeave={true} transitionEnter={true}
                     transitionAppear={true} transitionAppearTimeout={400}
                     transitionEnterTimeout={400} transitionLeaveTimeout={200}>
-                    <NgIf key={this.props.needSaving} cond={this.props.needSaving}>
+                    <NgIf cond={!!this.props.needSaving || !!this.props.isSaving}>
                         <NgIf cond={!this.props.isSaving}>
                             <Fab onClick={this.save.bind(this)}>
                                 <Icon name="save" style={{ height: "100%", width: "100%" }} />

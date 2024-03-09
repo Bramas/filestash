@@ -130,7 +130,7 @@ export function Form({
                     const key = Object.keys(form)[0];
                     if (selectedTab !== i) return null;
 
-                    const auth = window.CONFIG["auth"].split(/\s*,\s*/);
+                    const auth = window.CONFIG["auth"];
                     if (auth.indexOf(key) !== -1 || auth.indexOf(form[key].label.value) !== -1) {
                         return hasUserInteracted === false && enabledBackends.length > 1 ? (
                             <Button
@@ -156,13 +156,12 @@ export function Form({
 
                     return (
                         <Card className="formBody" key={`form${i}`}>
-                            <form onSubmit={(e) => onSubmitForm(e)}
-                                autoComplete="off" autoCapitalize="off"
-                                spellCheck="false" autoCorrect="off">
+                            <form onSubmit={(e) => onSubmitForm(e)}>
                                 <FormBuilder
                                     form={form[key]}
                                     onChange={onFormChange}
-                                    render={renderForm} />
+                                    render={renderForm}
+                                    autoComplete />
                                 <Button theme="emphasis">{ t("CONNECT") }</Button>
                             </form>
                         </Card>

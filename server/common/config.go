@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -21,7 +22,7 @@ type Configuration struct {
 	mu             sync.Mutex
 	currentElement *FormElement
 	cache          KeyValueStore
-	form           []Form
+	Form           []Form
 	Conn           []map[string]interface{}
 }
 
@@ -59,7 +60,7 @@ func NewConfiguration() Configuration {
 		onChange: make([]ChangeListener, 0),
 		mu:       sync.Mutex{},
 		cache:    NewKeyValueStore(),
-		form: []Form{
+		Form: []Form{
 			Form{
 				Title: "general",
 				Elmnts: []FormElement{
@@ -73,7 +74,6 @@ func NewConfiguration() Configuration {
 					FormElement{Name: "logout", Type: "text", Default: "", Description: "Redirection URL whenever user click on the logout button"},
 					FormElement{Name: "display_hidden", Type: "boolean", Default: false, Description: "Should files starting with a dot be visible by default?"},
 					FormElement{Name: "refresh_after_upload", Type: "boolean", Default: false, Description: "Refresh directory listing after upload"},
-					FormElement{Name: "auto_connect", Type: "boolean", Default: false, Description: "User don't have to click on the login button if an admin is prefilling a unique backend"},
 					FormElement{Name: "upload_button", Type: "boolean", Default: false, Description: "Display the upload button on any device"},
 					FormElement{Name: "upload_pool_size", Type: "number", Default: 15, Description: "Maximum number of files upload in parallel (Default: 15)"},
 					FormElement{Name: "filepage_default_view", Type: "select", Default: "grid", Opts: []string{"list", "grid"}, Description: "Default layout for files and folder on the file page"},
@@ -86,11 +86,25 @@ func NewConfiguration() Configuration {
 				Title: "features",
 				Form: []Form{
 					Form{
+						Title: "api",
+						Elmnts: []FormElement{
+							FormElement{Name: "enable", Type: "boolean", Default: true, Description: "Enable/Disable the API"},
+							FormElement{Name: "api_key", Type: "long_text", Description: "Format: '[mandatory:key] [optional:hostname]'. The hostname is used to enabled CORS for your application.", Placeholder: "foobar *.filestash.app"},
+						},
+					},
+					Form{
 						Title: "share",
 						Elmnts: []FormElement{
 							FormElement{Name: "enable", Type: "boolean", Default: true, Description: "Enable/Disable the share feature"},
 							FormElement{Name: "default_access", Type: "select", Default: "editor", Opts: []string{"editor", "viewer"}, Description: "Default access for shared links"},
-							FormElement{Name: "redirect", Type: "string", Placeholder: "redirection URL", Description: "When set, shared links will perform a redirection to another link. Example: https://example.com?full_path={{path}}"},
+							FormElement{Name: "redirect", Type: "text", Placeholder: "redirection URL", Description: "When set, shared links will perform a redirection to another link. Example: https://example.com?full_path={{path}}"},
+						},
+					},
+					Form{
+						Title: "protection",
+						Elmnts: []FormElement{
+							FormElement{Name: "iframe", Type: "text", Default: "", Description: "list of domains who can use the application from an iframe. eg: https://www.filestash.app http://example.com"},
+							FormElement{Name: "enable_chromecast", Type: "boolean", Default: true, Description: "Enable users to stream content on a chromecast device. This feature requires the browser to access google's server to download the chromecast SDK."},
 						},
 					},
 				},
@@ -99,7 +113,7 @@ func NewConfiguration() Configuration {
 				Title: "log",
 				Elmnts: []FormElement{
 					FormElement{Name: "enable", Type: "enable", Target: []string{"log_level"}, Default: true},
-					FormElement{Name: "level", Type: "select", Default: "INFO", Opts: []string{"DEBUG", "INFO", "WARNING", "ERROR"}, Id: "log_level", Description: "Default: \"INFO\". This setting determines the level of detail at which log events are written to the log file"},
+					FormElement{Name: "level", Type: "select", Default: defaultValue("INFO", "LOG_LEVEL"), Opts: []string{"DEBUG", "INFO", "WARNING", "ERROR"}, Id: "log_level", Description: "Default: \"INFO\". This setting determines the level of detail at which log events are written to the log file"},
 					FormElement{Name: "telemetry", Type: "boolean", Default: false, Description: "We won't share anything with any third party. This will only to be used to improve Filestash"},
 				},
 			},
@@ -125,7 +139,7 @@ func NewConfiguration() Configuration {
 }
 
 func (this Form) MarshalJSON() ([]byte, error) {
-	return []byte(this.toJSON(func(el FormElement) string {
+	return []byte(this.ToJSON(func(el FormElement) string {
 		a, e := json.Marshal(el)
 		if e != nil {
 			return ""
@@ -134,7 +148,7 @@ func (this Form) MarshalJSON() ([]byte, error) {
 	})), nil
 }
 
-func (this Form) toJSON(fn func(el FormElement) string) string {
+func (this Form) ToJSON(fn func(el FormElement) string) string {
 	formatKey := func(str string) string {
 		return strings.Replace(str, " ", "_", -1)
 	}
@@ -159,7 +173,7 @@ func (this Form) toJSON(fn func(el FormElement) string) string {
 		if i == 0 && len(this.Elmnts) == 0 {
 			ret = fmt.Sprintf("%s{", ret)
 		}
-		ret = ret + this.Form[i].toJSON(fn)
+		ret = ret + this.Form[i].ToJSON(fn)
 		if i == len(this.Form)-1 {
 			ret = fmt.Sprintf("%s}", ret)
 		}
@@ -279,57 +293,45 @@ func (this *Configuration) Initialise() {
 	}
 	if env := os.Getenv("APPLICATION_URL"); env != "" {
 		shouldSave = true
-		this.Get("general.host").Set(env).String()
+		_ = this.Get("general.host").Set(env).String()
 	}
 	if this.Get("general.secret_key").String() == "" {
 		shouldSave = true
 		key := RandomString(16)
 		this.Get("general.secret_key").Set(key)
 	}
-
 	if len(this.Conn) == 0 {
 		this.Conn = []map[string]interface{}{
 			map[string]interface{}{
-				"type":  "webdav",
-				"label": "WebDav",
-			},
-			map[string]interface{}{
-				"type":  "ftp",
-				"label": "FTP",
-			},
-			map[string]interface{}{
 				"type":  "sftp",
 				"label": "SFTP",
-			},
-			map[string]interface{}{
-				"type":  "git",
-				"label": "GIT",
 			},
 			map[string]interface{}{
 				"type":  "s3",
 				"label": "S3",
 			},
 			map[string]interface{}{
-				"type":  "dropbox",
-				"label": "Dropbox",
+				"type":  "ftp",
+				"label": "FTP",
 			},
 			map[string]interface{}{
-				"type":  "gdrive",
-				"label": "Drive",
+				"type":  "webdav",
+				"label": "WebDAV",
 			},
 		}
 		shouldSave = true
 	}
+
 	if shouldSave {
 		this.Save()
 	}
 	InitSecretDerivate(this.Get("general.secret_key").String())
 }
 
-func (this Configuration) Save() Configuration {
+func (this *Configuration) Save() {
 	// convert config data to an appropriate json struct
-	form := append(this.form, Form{Title: "connections"})
-	v := Form{Form: form}.toJSON(func(el FormElement) string {
+	form := append(this.Form, Form{Title: "connections"})
+	v := Form{Form: form}.ToJSON(func(el FormElement) string {
 		a, e := json.Marshal(el.Value)
 		if e != nil {
 			return "null"
@@ -341,15 +343,13 @@ func (this Configuration) Save() Configuration {
 	if err := SaveConfig(PrettyPrint([]byte(v))); err != nil {
 		Log.Error("config::save %s", err.Error())
 	}
-	return this
 }
 
-func (this Configuration) Export() interface{} {
+func (this *Configuration) Export() interface{} {
 	return struct {
 		Editor                  string            `json:"editor"`
 		ForkButton              bool              `json:"fork_button"`
 		DisplayHidden           bool              `json:"display_hidden"`
-		AutoConnect             bool              `json:"auto_connect"`
 		Name                    string            `json:"name"`
 		UploadButton            bool              `json:"upload_button"`
 		Connections             interface{}       `json:"connections"`
@@ -362,12 +362,13 @@ func (this Configuration) Export() interface{} {
 		RefreshAfterUpload      bool              `json:"refresh_after_upload"`
 		FilePageDefaultSort     string            `json:"default_sort"`
 		FilePageDefaultView     string            `json:"default_view"`
-		AuthMiddleware          interface{}       `json:"auth"`
+		AuthMiddleware          []string          `json:"auth"`
+		Thumbnailer             []string          `json:"thumbnailer"`
+		EnableChromecast        bool              `json:"enable_chromecast"`
 	}{
 		Editor:                  this.Get("general.editor").String(),
 		ForkButton:              this.Get("general.fork_button").Bool(),
 		DisplayHidden:           this.Get("general.display_hidden").Bool(),
-		AutoConnect:             this.Get("general.auto_connect").Bool(),
 		Name:                    this.Get("general.name").String(),
 		UploadButton:            this.Get("general.upload_button").Bool(),
 		Connections:             this.Conn,
@@ -380,12 +381,25 @@ func (this Configuration) Export() interface{} {
 		RefreshAfterUpload:      this.Get("general.refresh_after_upload").Bool(),
 		FilePageDefaultSort:     this.Get("general.filepage_default_sort").String(),
 		FilePageDefaultView:     this.Get("general.filepage_default_view").String(),
-		AuthMiddleware: func() string {
+		AuthMiddleware: func() []string {
 			if this.Get("middleware.identity_provider.type").String() == "" {
-				return ""
+				return []string{}
 			}
-			return this.Get("middleware.attribute_mapping.related_backend").String()
+			return regexp.MustCompile("\\s*,\\s*").Split(
+				this.Get("middleware.attribute_mapping.related_backend").String(), -1,
+			)
 		}(),
+		Thumbnailer: func() []string {
+			tMap := Hooks.Get.Thumbnailer()
+			tArray := make([]string, len(tMap))
+			i := 0
+			for key, _ := range tMap {
+				tArray[i] = key
+				i += 1
+			}
+			return tArray
+		}(),
+		EnableChromecast: this.Get("features.protection.enable_chromecast").Bool(),
 	}
 }
 
@@ -424,7 +438,7 @@ func (this *Configuration) Get(key string) *Configuration {
 	this.mu.Lock()
 	tmp := this.cache.Get(key)
 	if tmp == nil {
-		this.currentElement = traverse(&this.form, strings.Split(key, "."))
+		this.currentElement = traverse(&this.Form, strings.Split(key, "."))
 		this.cache.Set(key, this.currentElement)
 	} else {
 		this.currentElement = tmp.(*FormElement)
@@ -458,11 +472,11 @@ func (this *Configuration) Default(value interface{}) *Configuration {
 }
 
 func (this *Configuration) Set(value interface{}) *Configuration {
+	this.mu.Lock()
 	if this.currentElement == nil {
 		return this
 	}
 
-	this.mu.Lock()
 	this.cache.Clear()
 	if this.currentElement.Value != value {
 		this.currentElement.Value = value
@@ -472,7 +486,7 @@ func (this *Configuration) Set(value interface{}) *Configuration {
 	return this
 }
 
-func (this Configuration) String() string {
+func (this *Configuration) String() string {
 	val := this.Interface()
 	switch val.(type) {
 	case string:
@@ -483,7 +497,7 @@ func (this Configuration) String() string {
 	return ""
 }
 
-func (this Configuration) Int() int {
+func (this *Configuration) Int() int {
 	val := this.Interface()
 	switch val.(type) {
 	case float64:
@@ -496,7 +510,7 @@ func (this Configuration) Int() int {
 	return 0
 }
 
-func (this Configuration) Bool() bool {
+func (this *Configuration) Bool() bool {
 	val := this.Interface()
 	switch val.(type) {
 	case bool:
@@ -505,7 +519,7 @@ func (this Configuration) Bool() bool {
 	return false
 }
 
-func (this Configuration) Interface() interface{} {
+func (this *Configuration) Interface() interface{} {
 	if this.currentElement == nil {
 		return nil
 	}
@@ -516,8 +530,8 @@ func (this Configuration) Interface() interface{} {
 	return val
 }
 
-func (this Configuration) MarshalJSON() ([]byte, error) {
-	form := this.form
+func (this *Configuration) MarshalJSON() ([]byte, error) {
+	form := this.Form
 	form = append(form, Form{
 		Title: "constant",
 		Elmnts: []FormElement{
@@ -578,4 +592,11 @@ func (this *Configuration) UnlistenForChange(c ChangeListener) {
 type ChangeListener struct {
 	Id       string
 	Listener chan interface{}
+}
+
+func defaultValue(dval string, envName string) string {
+	if val := os.Getenv(envName); val != "" {
+		return val
+	}
+	return dval
 }

@@ -23,7 +23,7 @@ export function SettingsPage({ isSaving = nop }) {
     const onChange = (_form) => {
         _form.connections = window.CONFIG.connections;
         delete _form.constant;
-        refresh(Math.random());
+        refresh(Date.now());
         isSaving(true);
         Config.save(_form, true, () => {
             isSaving(false);
@@ -70,12 +70,13 @@ export function SettingsPage({ isSaving = nop }) {
     );
 
     return (
-        <form className="sticky">
-            <FormBuilder
-                form={form}
-                onChange={onChange}
-                autoComplete="new-password"
-                render={renderForm} />
-        </form>
+        <div className="component_settingspage sticky">
+            <form>
+                <FormBuilder
+                    form={form}
+                    onChange={onChange}
+                    render={renderForm} />
+            </form>
+        </div>
     );
 }

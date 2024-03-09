@@ -15,18 +15,27 @@ package common
 
 import (
 	"fmt"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 )
 
 var (
-	configPath string = filepath.Join(GetCurrentDir(), CONFIG_PATH+"config.json")
+	configPath          string   = GetAbsolutePath(CONFIG_PATH, "config.json")
+	configKeysToEncrypt []string = []string{
+		"middleware.identity_provider.params",
+		"middleware.attribute_mapping.params",
+	}
 )
 
 func LoadConfig() ([]byte, error) {
 	file, err := os.OpenFile(configPath, os.O_RDONLY, os.ModePerm)
 	if err != nil {
+		if os.IsNotExist(err) {
+			os.MkdirAll(GetAbsolutePath(CONFIG_PATH), os.ModePerm)
+			return []byte(""), nil
+		}
 		return nil, err
 	}
 	cFile, err := ioutil.ReadAll(file)
@@ -34,7 +43,30 @@ func LoadConfig() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cFile, nil
+	configStr := string(cFile)
+	for _, jsonPathWithEncryptedData := range configKeysToEncrypt {
+		p := gjson.Get(configStr, jsonPathWithEncryptedData).String()
+		if p == "" {
+			continue
+		}
+		key := os.Getenv("CONFIG_SECRET")
+		if key == "" {
+			InitSecretDerivate(gjson.Get(configStr, "general.secret_key").String())
+			key = SECRET_KEY_DERIVATE_FOR_PROOF
+		}
+		t, err := DecryptString(Hash(key, 16), p)
+		if err != nil {
+			Log.Warning("common::config_state::load cannot decrypt config path '%s': %s", jsonPathWithEncryptedData, err.Error())
+			continue
+		}
+		val, err := sjson.Set(configStr, jsonPathWithEncryptedData, t)
+		if err != nil {
+			Log.Warning("common::config_state::load cannot put json value in config '%s': %s", jsonPathWithEncryptedData, err.Error())
+			continue
+		}
+		configStr = val
+	}
+	return []byte(configStr), nil
 }
 
 func SaveConfig(v []byte) error {
@@ -46,6 +78,29 @@ func SaveConfig(v []byte) error {
 			configPath,
 		)
 	}
-	file.Write(PrettyPrint([]byte(v)))
+
+	configStr := string(v)
+	for _, jsonPathWithEncryptedData := range configKeysToEncrypt {
+		key := os.Getenv("CONFIG_SECRET")
+		if key == "" {
+			key = SECRET_KEY_DERIVATE_FOR_PROOF
+		}
+		p := gjson.Get(configStr, jsonPathWithEncryptedData).String()
+		if p == "" {
+			continue
+		}
+		t, err := EncryptString(Hash(key, 16), p)
+		if err != nil {
+			Log.Warning("common::config_state::save cannot encrypt config path '%s': %s", jsonPathWithEncryptedData, err.Error())
+			continue
+		}
+		val, err := sjson.Set(configStr, jsonPathWithEncryptedData, t)
+		if err != nil {
+			Log.Warning("common::config_state::save cannot put json value in config '%s': %s", jsonPathWithEncryptedData, err.Error())
+			continue
+		}
+		configStr = val
+	}
+	file.Write(PrettyPrint([]byte(configStr)))
 	return file.Close()
 }

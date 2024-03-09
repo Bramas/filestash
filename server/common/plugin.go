@@ -3,7 +3,10 @@ package common
 import (
 	"github.com/gorilla/mux"
 	"io"
+	"io/fs"
 	"net/http"
+	"path/filepath"
+	"strings"
 )
 
 type Plugin struct {
@@ -56,6 +59,35 @@ func (this Get) HttpEndpoint() []func(*mux.Router, *App) error {
 }
 
 /*
+ * Override some urls with static content. The main use case for this is to enable
+ * plugins to change the frontend code and overwrite some core components
+ */
+func (this Register) Static(www fs.FS, chroot string) {
+	fs.WalkDir(www, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		} else if d.IsDir() {
+			return nil
+		}
+		this.HttpEndpoint(func(r *mux.Router, app *App) error {
+			r.PathPrefix("/" + strings.TrimPrefix(path, chroot)).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				f, err := www.Open(path)
+				if err != nil {
+					w.Header().Set("Content-Type", "text/plain")
+					w.Write([]byte("plugin.go::static::err " + err.Error()))
+					return
+				}
+				w.Header().Set("Content-Type", GetMimeType(filepath.Ext(path)))
+				io.Copy(w, f)
+				f.Close()
+			})
+			return nil
+		})
+		return nil
+	})
+}
+
+/*
  * Starter is the meat that let us connect to a wide variety of server like:
  * - plg_starter_http which is the default that server the application under 8334
  * - plg_starter_tor to serve the application via tor
@@ -80,13 +112,13 @@ func (this Get) Starter() []func(*mux.Router) {
  * - plg_authentication_ldap
  * - ...
  */
-var authentication_middleware map[string]IAuth = make(map[string]IAuth, 0)
+var authentication_middleware map[string]IAuthentication = make(map[string]IAuthentication, 0)
 
-func (this Register) AuthenticationMiddleware(id string, am IAuth) {
+func (this Register) AuthenticationMiddleware(id string, am IAuthentication) {
 	authentication_middleware[id] = am
 }
 
-func (this Get) AuthenticationMiddleware() map[string]IAuth {
+func (this Get) AuthenticationMiddleware() map[string]IAuthentication {
 	return authentication_middleware
 }
 
@@ -122,6 +154,33 @@ func (this Get) SearchEngine() ISearch {
 }
 
 /*
+ * The idea here is to enable plugin to register their own thumbnailing process, typically
+ * images but could also be videos, pdf, excel documents, ...
+ */
+var thumbnailer map[string]IThumbnailer = make(map[string]IThumbnailer)
+
+func (this Register) Thumbnailer(mimeType string, fn IThumbnailer) {
+	thumbnailer[mimeType] = fn
+}
+
+func (this Get) Thumbnailer() map[string]IThumbnailer {
+	return thumbnailer
+}
+
+/*
+ * Pluggable Audit interface
+ */
+var audit IAuditPlugin
+
+func (this Register) AuditEngine(a IAuditPlugin) {
+	audit = a
+}
+
+func (this Get) AuditEngine() IAuditPlugin {
+	return audit
+}
+
+/*
  * UI Overrides
  * They are the means by which server plugin change the frontend behaviors.
  */
@@ -143,7 +202,36 @@ func (this Get) XDGOpen() []string {
 	return xdg_open
 }
 
+var cssOverride []func() string
+
+func (this Register) CSS(stylesheet string) {
+	cssOverride = append(cssOverride, func() string {
+		return stylesheet
+	})
+}
+
+func (this Register) CSSFunc(stylesheet func() string) {
+	cssOverride = append(cssOverride, stylesheet)
+}
+
+func (this Get) CSS() string {
+	s := ""
+	for i := 0; i < len(cssOverride); i++ {
+		s += cssOverride[i]() + "\n"
+	}
+	return s
+}
+
 const OverrideVideoSourceMapper = "/overrides/video-transcoder.js"
+
+var afterload []func()
+
+func (this Register) Onload(fn func()) {
+	afterload = append(afterload, fn)
+}
+func (this Get) Onload() []func() {
+	return afterload
+}
 
 func init() {
 	Hooks.Register.FrontendOverrides(OverrideVideoSourceMapper)
